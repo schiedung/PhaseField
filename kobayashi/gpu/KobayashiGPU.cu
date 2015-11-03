@@ -209,8 +209,8 @@ __global__
 void SetBoundariesX(double* field)
 {
     // Define global indices of the device memory
-    int j = blockIdx.y * blockDim.y + threadIdx.y + BCELLS;
-    int k = blockIdx.z * blockDim.z + threadIdx.z + BCELLS;
+    int j = blockIdx.y * blockDim.y + threadIdx.y;
+    int k = blockIdx.z * blockDim.z + threadIdx.z;
 
         field[Index(0 ,j,k)] = field[Index(1   ,j,k)];
         field[Index(Nx,j,k)] = field[Index(Nx-1,j,k)];
@@ -221,8 +221,8 @@ __global__
 void SetBoundariesY(double* field)
 {
     // Define global indices of the device memory
-    int i = blockIdx.x * blockDim.x + threadIdx.x + BCELLS;
-    int k = blockIdx.z * blockDim.z + threadIdx.z + BCELLS;
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int k = blockIdx.z * blockDim.z + threadIdx.z;
 
         field[Index(i,0 ,k)] = field[Index(i,1   ,k)];
         field[Index(i,Ny,k)] = field[Index(i,Ny-1,k)];
@@ -233,8 +233,8 @@ __global__
 void SetBoundariesZ(double* field)
 {
     // Define global indices of the device memory
-    int i = blockIdx.x * blockDim.x + threadIdx.x + BCELLS;
-    int j = blockIdx.y * blockDim.y + threadIdx.y + BCELLS;
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int j = blockIdx.y * blockDim.y + threadIdx.y;
 
         field[Index(i,j,0 )] = field[Index(i,j,1   )];
         field[Index(i,j,Nz)] = field[Index(i,j,Nz-1)];
@@ -246,13 +246,13 @@ void SetBoundaries(double* field)
 {
 
     // Define grid/block structure
-    dim3 dimGridX(  1           , DIM_GRID_Y  , DIM_GRID_Z );
-    dim3 dimGridY(  DIM_GRID_X  , 1           , DIM_GRID_Z );
-    dim3 dimGridZ(  DIM_GRID_X  , DIM_GRID_Y  , 1          );
+    dim3 dimGridX(  1  , 1  , Mz );
+    dim3 dimGridY(  Mx , 1  , 1  );
+    dim3 dimGridZ(  1  , My , 1  );
 
-    dim3 dimBlockX( 1           , DIM_BLOCK_Y , DIM_BLOCK_Z);
-    dim3 dimBlockY( DIM_BLOCK_X , 1           , DIM_BLOCK_Z);
-    dim3 dimBlockZ( DIM_BLOCK_X , DIM_BLOCK_Y , 1          );
+    dim3 dimBlockX( 1  , My , 1 );
+    dim3 dimBlockY( 1  , 1  , Mz);
+    dim3 dimBlockZ( Mx , 1  , 1 );
 
     // Set Boundary conditions
     SetBoundariesX<<< dimGridX, dimBlockX >>>(field);

@@ -194,8 +194,8 @@ void ApplyTimeStep(double* Phi, double* PhiDot, double* Temp, double* TempDot)
 void SetBoundariesX(double* field)
 {
     #pragma omp parallel for schedule(auto) collapse(1)
-    for (int j = BCELLS; j < Ny + BCELLS; j++)
-    for (int k = BCELLS; k < Nz + BCELLS; k++)
+    for (int j = 0; j < My; j++)
+    for (int k = 0; k < Mz; k++)
     {
         field[Index(0 ,j,k)] = field[Index(1   ,j,k)];
         field[Index(Nx,j,k)] = field[Index(Nx-1,j,k)];
@@ -205,8 +205,8 @@ void SetBoundariesX(double* field)
 void SetBoundariesY(double* field)
 {
     #pragma omp parallel for schedule(auto) collapse(1)
-    for (int i = BCELLS; i < Nx + BCELLS; i++)
-    for (int k = BCELLS; k < Nz + BCELLS; k++)
+    for (int i = 0; i < Mx; i++)
+    for (int k = 0; k < Mz; k++)
     {
         field[Index(i,0 ,k)] = field[Index(i,1   ,k)];
         field[Index(i,Ny,k)] = field[Index(i,Ny-1,k)];
@@ -216,8 +216,8 @@ void SetBoundariesY(double* field)
 void SetBoundariesZ(double* field)
 {
     #pragma omp parallel for schedule(auto) collapse(1)
-    for (int i = BCELLS; i < Nx + BCELLS; i++)
-    for (int j = BCELLS; j < Ny + BCELLS; j++)
+    for (int i = 0; i < Mx; i++)
+    for (int j = 0; j < My; j++)
     {
         field[Index(i,j,0 )] = field[Index(i,j,1   )];
         field[Index(i,j,Nz)] = field[Index(i,j,Nz-1)];
