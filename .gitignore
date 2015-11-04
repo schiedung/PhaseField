@@ -4,6 +4,6 @@
 *.o
 kobayashi/cpu/KobayashiCPU
 kobayashi/gpu/KobayashiGPU
-mobility/cpu/MobilityTest
+mobility/cpu/PhaseFieldCPU
 mobility/gpu/PhaseField
 tags
