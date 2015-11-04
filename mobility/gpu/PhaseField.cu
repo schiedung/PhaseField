@@ -44,14 +44,14 @@ __device__ __constant__ int devMz = DIM_GRID_Z * DIM_BLOCK_Z + 2 * BCELLS;
 
 // Define number of time steps
 const int Nt     = 2000; // Number of time steps
-const int tOut   = 100;  // Output distance in time steps
+const int tOut   = 100; // Output distance in time steps
 bool WriteToDisk = true;
 
 // Define grid spacing
-__device__ __constant__ double dx = 3.0e-2;  // Grid spacing in x-direction [m]
-__device__ __constant__ double dy = 3.0e-2;  // Grid spacing in y-direction [m]
-__device__ __constant__ double dz = 3.0e-2;  // Grid spacing in z-direction [m]
-__device__ __constant__ double dt = 1.0e-4;  // Size of time step [s]
+__device__ __constant__ double dx = 1.0e-3;  // Grid spacing in x-direction [m]
+__device__ __constant__ double dy = 1.0e-3;  // Grid spacing in y-direction [m]
+__device__ __constant__ double dz = 1.0e-3;  // Grid spacing in z-direction [m]
+__device__ __constant__ double dt = 1.0e-3;  // Size of time step [s]
 
 // Some material parameters (aluminium)
 #define rho 2.702000e+3  // Density Al [Kg/m3] 
@@ -60,15 +60,16 @@ __device__ __constant__ double dt = 1.0e-4;  // Size of time step [s]
 #define a   2.698150e-2  // Molar mass [Kg/mol]
 
 // Physical parameters
-__device__ __constant__ double mu     = 1.0e-2;     // Interface mobility [m^2/J*s]
-__device__ __constant__ double sigma0 = 1.0;        // Interface energy [J/m]
+__device__ __constant__ double mu     = 1.0e-5;     // Interface mobility [m^2/J*s]
+__device__ __constant__ double sigma0 = 0.55;       // Interface energy [J/m]
 __device__ __constant__ double dS     = 11.4744;    // Entropy constant [J/(K mol?)]
-__device__ __constant__ double eta    = 3.0e-1;     // Interface width [m]
+__device__ __constant__ double eta    = 1.0e-2;     // Interface width [m]
 __device__ __constant__ double alpha0 = 3.52e-5;    // Thermal diffusivity [m2/s]
 __device__ __constant__ double alpha1 = 6.80e-5;    // Thermal diffusivity [m2/s]
 __device__ __constant__ double kappa  = a*dH/(cp);  // Latent heat parameter [K] L/(rho*cp)
 __device__ __constant__ double Tm     = 933.47;     // Melting temperature
 __device__ __constant__ double Ts     = 933.00;     // Initial solid temperature
+//#define mu 4*alpha0/(3*dS*kappa*eta)
 
 // Misc parameters
 __device__ __constant__ double ampl         = 0.01;   // Amplitude of noise
@@ -207,14 +208,15 @@ void CalcTimeStep(double* Phi, double* PhiDot, double* Temp, double* TempDot, cu
         double locPhiDot  = 0.0;
         double locTempDot = 0.0;
 
-        if ((locPhi > 0.0) or (locPhi < 1.0))       
-        {
-            // Calculate the derivate of the double obstacle potential
-            locPhiDot  += sigma(i,j,k) * pow(M_PI/eta,2) * (locPhi - 0.5);
-            // Calculate driving force
-            double qPhi = locPhi * (1.0 - locPhi);
-            locPhiDot  -= M_PI/(eta) * sqrt(qPhi) * dS * (Ts - kappa - Tm);
-        }
+        double sig = 0.0;
+        if ((locPhi < 1.0) or (locPhi > 0.0)) sig =  1.0;
+        if ((locPhi > 1.0) or (locPhi < 0.0)) sig = -1.0;
+
+        locPhiDot  += sig * sigma(i,j,k) * pow(M_PI/eta,2) * (locPhi - 0.5);
+
+        double qPhi = 0.0;
+        if (sig == 1.0) qPhi = locPhi * (1.0 - locPhi);
+        locPhiDot  -= M_PI/(eta) * sqrt(qPhi) * dS * (Temp[locIndex] - Tm);
 
         // Calculate Laplacian of the phase field
         locPhiDot  += sigma(i,j,k)  * Laplace(Phi,i,j,k);
@@ -240,16 +242,9 @@ void ApplyTimeStep(double* Phi, double* PhiDot, double* Temp, double* TempDot)
 
         int locIndex = Index(i,j,k);
 
-        if (PhiDot[locIndex] != 0.0)
-        {
-            // Update phase field
-            Phi   [locIndex] += dt * PhiDot [locIndex];
-            PhiDot[locIndex]  = 0.0;
-
-            // Limit phase field
-            if      (Phi[locIndex] <     PhiPrecision) Phi[locIndex] = 0.0;
-            else if (Phi[locIndex] > 1 - PhiPrecision) Phi[locIndex] = 1.0;
-        }
+        // Update fields
+        Phi    [locIndex] += dt * PhiDot [locIndex];
+        PhiDot [locIndex]  = 0.0;
         Temp   [locIndex] += dt * TempDot[locIndex];
         TempDot[locIndex]  = 0.0;
 }
@@ -258,8 +253,8 @@ __global__
 void SetBoundariesX(double* field)
 {
     // Define global indices of the device memory
-    int j = blockIdx.y * blockDim.y + threadIdx.y + BCELLS;
-    int k = blockIdx.z * blockDim.z + threadIdx.z + BCELLS;
+    int j = blockIdx.y * blockDim.y + threadIdx.y;
+    int k = blockIdx.z * blockDim.z + threadIdx.z;
 
         field[Index(0 ,j,k)] = field[Index(1   ,j,k)];
         field[Index(Nx,j,k)] = field[Index(Nx-1,j,k)];
@@ -270,8 +265,8 @@ __global__
 void SetBoundariesY(double* field)
 {
     // Define global indices of the device memory
-    int i = blockIdx.x * blockDim.x + threadIdx.x + BCELLS;
-    int k = blockIdx.z * blockDim.z + threadIdx.z + BCELLS;
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int k = blockIdx.z * blockDim.z + threadIdx.z;
 
         field[Index(i,0 ,k)] = field[Index(i,1   ,k)];
         field[Index(i,Ny,k)] = field[Index(i,Ny-1,k)];
@@ -282,8 +277,8 @@ __global__
 void SetBoundariesZ(double* field)
 {
     // Define global indices of the device memory
-    int i = blockIdx.x * blockDim.x + threadIdx.x + BCELLS;
-    int j = blockIdx.y * blockDim.y + threadIdx.y + BCELLS;
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int j = blockIdx.y * blockDim.y + threadIdx.y;
 
         field[Index(i,j,0 )] = field[Index(i,j,1   )];
         field[Index(i,j,Nz)] = field[Index(i,j,Nz-1)];
@@ -293,13 +288,15 @@ void SetBoundariesZ(double* field)
 __host__
 void SetBoundaries(double* field)
 {
-    dim3 dimGridX(  1           , DIM_GRID_Y  , DIM_GRID_Z );
-    dim3 dimGridY(  DIM_GRID_X  , 1           , DIM_GRID_Z );
-    dim3 dimGridZ(  DIM_GRID_X  , DIM_GRID_Y  , 1          );
 
-    dim3 dimBlockX( 1           , DIM_BLOCK_Y , DIM_BLOCK_Z);
-    dim3 dimBlockY( DIM_BLOCK_X , 1           , DIM_BLOCK_Z);
-    dim3 dimBlockZ( DIM_BLOCK_X , DIM_BLOCK_Y , 1          );
+    // Define grid/block structure
+    dim3 dimGridX(  1  , 1  , Mz );
+    dim3 dimGridY(  Mx , 1  , 1  );
+    dim3 dimGridZ(  1  , My , 1  );
+
+    dim3 dimBlockX( 1  , My , 1 );
+    dim3 dimBlockY( 1  , 1  , Mz);
+    dim3 dimBlockZ( Mx , 1  , 1 );
 
     // Set Boundary conditions
     SetBoundariesX<<< dimGridX, dimBlockX >>>(field);
