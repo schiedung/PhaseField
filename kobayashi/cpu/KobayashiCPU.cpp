@@ -150,7 +150,7 @@ void CalcTimeStep(double* Phi, double* PhiDot, double* Temp, double* TempDot)
             double sigma = (1.-4.*delta*(1.-theta));
 
             // Calculate noise
-            double noise = 0.0;//ampl * rand()/RAND_MAX;
+            double noise = ampl * rand()/RAND_MAX;
 
             // Calculate driving force am
             double m = (alpha/M_PI) * atan(Gamma*(Tm - Temp[locIndex])*sigma);
