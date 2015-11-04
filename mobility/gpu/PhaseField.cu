@@ -45,33 +45,42 @@ __device__ __constant__ int devMz = DIM_GRID_Z * DIM_BLOCK_Z + 2 * BCELLS;
 // Define number of time steps
 const int Nt     = 2000; // Number of time steps
 const int tOut   = 100;  // Output distance in time steps
-bool WriteToDisk = false;
+bool WriteToDisk = true;
 
 // Define grid spacing
-__device__ __constant__ double dx = 0.03;    // Grid spacing in x-direction [m]
-__device__ __constant__ double dy = 0.03;    // Grid spacing in y-direction [m]
-__device__ __constant__ double dz = 0.03;    // Grid spacing in z-direction [m]
+__device__ __constant__ double dx = 3.0e-2;  // Grid spacing in x-direction [m]
+__device__ __constant__ double dy = 3.0e-2;  // Grid spacing in y-direction [m]
+__device__ __constant__ double dz = 3.0e-2;  // Grid spacing in z-direction [m]
 __device__ __constant__ double dt = 1.0e-4;  // Size of time step [s]
 
-// Kobayashi's parameters (not exactly his..)
-__device__ __constant__ double epsilon = 0.010;   // Gradient energy coefficient
-__device__ __constant__ double tau     = 3.0e-4;  // Inverse of interface mobility [s]
-__device__ __constant__ double alpha   = 0.8;     // Coefficient of driving force
-__device__ __constant__ double Gamma   = 10.0;    // Coefficient of driving force
-__device__ __constant__ double delta   = 0.10;    // Anisotropy in (0,1)
-__device__ __constant__ double K       = 1.7;     // Referrers to latent heat (no-dimension)
-__device__ __constant__ double T0      = 0.0;     // Initial temperature
-__device__ __constant__ double Tm      = 1.0;     // Equilibrium temperature  (no-dimension)
-__device__ __constant__ double ampl    = 0.01;    // Amplitude of noise
-__device__ __constant__ int    seed    = 123;     // Random number seed
+// Some material parameters (aluminium)
+#define rho 2.702000e+3  // Density Al [Kg/m3] 
+#define dH  1.069768e+5  // Latent heat of fusion [J/mol] 
+#define cp  3.169866e+1  // Heat capacity[J/(mol K)] 
+#define a   2.698150e-2  // Molar mass [Kg/mol]
+
+// Physical parameters
+__device__ __constant__ double mu     = 1.0e-2;     // Interface mobility [m^2/J*s]
+__device__ __constant__ double sigma0 = 1.0;        // Interface energy [J/m]
+__device__ __constant__ double dS     = 11.4744;    // Entropy constant [J/(K mol?)]
+__device__ __constant__ double eta    = 3.0e-1;     // Interface width [m]
+__device__ __constant__ double alpha0 = 3.52e-5;    // Thermal diffusivity [m2/s]
+__device__ __constant__ double alpha1 = 6.80e-5;    // Thermal diffusivity [m2/s]
+__device__ __constant__ double kappa  = a*dH/(cp);  // Latent heat parameter [K] L/(rho*cp)
+__device__ __constant__ double Tm     = 933.47;     // Melting temperature
+__device__ __constant__ double Ts     = 933.00;     // Initial solid temperature
 
 // Misc parameters
-__device__ __constant__ double Radius        = 0.4;    // Initial radius of spherical grain
-__device__ __constant__ double PhiPrecision  = 1.e-9;  // Phase-field cut off
+__device__ __constant__ double ampl         = 0.01;   // Amplitude of noise
+__device__ __constant__ int    seed         = 123;    // Random number seed
+__device__ __constant__ int    iRadius      = 10;     // Initial radius of spherical grain
+__device__ __constant__ double PhiPrecision = 1.e-9;  // Phase-field cut off
 
 void WriteToFile(const int tStep, double* field, string name);
 __global__ void InitializeRandomNumbers( curandState *state);
 
+
+// Calculates the 1d memory index at certain grind point (i,j,k)
 __device__
 inline int Index(int i, int j, int k)
 {
@@ -79,32 +88,66 @@ inline int Index(int i, int j, int k)
     return (k * devMy + j) * devMx + i;
 }
 
+__device__
+double temperature_steady_state(const double x, const double v)
+{
+    double A  = pow(M_PI*alpha0,2) / (pow(M_PI*alpha0,2) + pow(eta*v,2));
+    double Tx = 0.0;
+
+    // Calculate the temperature Tx at the point x
+    if ((x >= 0.0) and (x <= eta))
+    {
+        Tx -= cos(M_PI * x / eta);
+        Tx += v * eta / (M_PI * alpha0) * sin(M_PI * x / eta);
+        Tx += exp(-v * x / alpha0);
+        Tx *= A;
+        Tx -= 1.0 - cos(M_PI * x / eta);
+        Tx *= 0.5 * kappa;
+        Tx += Ts;
+    }
+    else
+    {
+        Tx += A * exp(-v * x / alpha0) * (exp(v * eta / alpha0) + 1.0) - 2.0 ;
+        Tx *= 0.5 * kappa ;
+        Tx += Ts;
+    }
+
+    return Tx;
+}
+
 __global__
 void InitializeSupercooledSphere(double* Phi, double* PhiDot, double* Temp,
         double* TempDot)
 {
     // Initialization
-    const double  x0 = Nx/2 * dx;
-    const double  y0 = Ny/2 * dy;
-    const double  z0 = Nz/2 * dz;
+    const double  i0 = Nx/2;
+    const double  j0 = Ny/2;
+    const double  k0 = Nz/2;
 
     // Define indices of the device memory
     int i = blockIdx.x * blockDim.x + threadIdx.x + BCELLS;
     int j = blockIdx.y * blockDim.y + threadIdx.y + BCELLS;
     int k = blockIdx.z * blockDim.z + threadIdx.z + BCELLS;
 
+        double velocity = 1.0e-3;
         int locIndex = Index(i,j,k);
         // Initialize the phase Field
-        double r = sqrt(pow(i*dx-x0,2) + pow(j*dy-y0,2) + pow(k*dz-z0,2));
-        if ( r < Radius)
+        double r = sqrt(pow((i-i0)*dx,2) + pow((j-j0)*dy,2) + pow((k-k0)*dz,2));
+        double x = r - iRadius * dx;
+        if (x < 0.0)
         {
-            Phi    [locIndex] = 1.0;
-            Temp   [locIndex] = Tm;
+            Phi [locIndex] = 1.0;
+            Temp[locIndex] = Ts;
+        }
+        else if (x < eta)
+        {
+            Phi [locIndex] = 0.5 + 0.5 * cos(M_PI / eta * x);
+            Temp[locIndex] = temperature_steady_state(x,velocity);
         }
         else
         {
-            Phi    [locIndex] = 0.0;
-            Temp   [locIndex] = T0;
+            Phi [locIndex] = 0.0;
+            Temp[locIndex] = temperature_steady_state(x,velocity);
         }
 
         PhiDot [locIndex] = 0.0;
@@ -137,6 +180,20 @@ double Laplace(double* field, int i, int j, int k)
     return df2_dx2 + df2_dy2 + df2_dz2;
 }
 
+// Calculates the thermal diffusivity inside the interface
+__device__
+inline double alpha(double Phi)
+{
+    return Phi * alpha1 + (1.0 - Phi) * alpha0; 
+}
+
+// Calculates the interface energy
+__device__
+inline double sigma(int i, int j, int k)
+{
+    return sigma0;
+}
+
 __global__
 void CalcTimeStep(double* Phi, double* PhiDot, double* Temp, double* TempDot, curandState * State)
 {
@@ -145,40 +202,32 @@ void CalcTimeStep(double* Phi, double* PhiDot, double* Temp, double* TempDot, cu
     int j = blockIdx.y * blockDim.y + threadIdx.y + BCELLS;
     int k = blockIdx.z * blockDim.z + threadIdx.z + BCELLS;
 
-        int locIndex     = Index(i,j,k);
-        double locPhiDot = 0.0;
-        double locPhi    = Phi[locIndex];
-        // Calculate driving force m
-        if ((locPhi > 0.0) or  (locPhi < 1.0))
+        int    locIndex   = Index(i,j,k);
+        double locPhi     = Phi[locIndex];
+        double locPhiDot  = 0.0;
+        double locTempDot = 0.0;
+
+        if ((locPhi > 0.0) or (locPhi < 1.0))       
         {
-            // Calculate gradient of Phi
-            double gradX = (Phi[Index(i+1,j,k)] - Phi[Index(i-1,j,k)])/(2*dx);
-            double gradY = (Phi[Index(i,j+1,k)] - Phi[Index(i,j-1,k)])/(2*dy);
-            double gradZ = (Phi[Index(i,j,k+1)] - Phi[Index(i,j,k-1)])/(2*dz);
-            double div   = pow(pow(gradX,2) + pow(gradY,2) + pow(gradZ,2),2);
-            double theta;
-            if ( div > 1.e-12)
-                theta = (pow(gradX,4) + pow(gradY,4)+ pow(gradZ,4))/div;
-            else
-                theta = 0.0;
-            double sigma = (1.-4.*delta*(1.-theta));
-
-            // Calculate noise
-            double noise = ampl * curand_uniform(&State[locIndex]);
-
-            // Calculate driving force am
-            double m = (alpha/M_PI) * atan(Gamma*(Tm - Temp[locIndex])*sigma);
-
-            // Add driving force to PhiDot
-            locPhiDot += locPhi*(1.0 - locPhi)*(locPhi - 0.5 + m + noise);
+            // Calculate the derivate of the double obstacle potential
+            locPhiDot  += sigma(i,j,k) * pow(M_PI/eta,2) * (locPhi - 0.5);
+            // Calculate driving force
+            double qPhi = locPhi * (1.0 - locPhi);
+            locPhiDot  -= M_PI/(eta) * sqrt(qPhi) * dS * (Ts - kappa - Tm);
         }
-        // Calculate Laplacian-term
-        locPhiDot += pow(epsilon,2) * Laplace(Phi,i,j,k);
-        locPhiDot /= tau;
 
+        // Calculate Laplacian of the phase field
+        locPhiDot  += sigma(i,j,k)  * Laplace(Phi,i,j,k);
+
+        // Apply interface mobility
+        locPhiDot  *= mu;
+        
+        // Calculate time derivative of the temperature
+        locTempDot += alpha(locPhi) * Laplace(Temp,i,j,k) + kappa * locPhiDot;
+
+        // Write time derivatives into the device memory
         PhiDot [locIndex] += locPhiDot;
-        TempDot[locIndex] += Laplace(Temp,i,j,k) + K * locPhiDot;
-
+        TempDot[locIndex] += locTempDot;
 }
 
 __global__
@@ -244,8 +293,6 @@ void SetBoundariesZ(double* field)
 __host__
 void SetBoundaries(double* field)
 {
-
-    // Define grid/block structure
     dim3 dimGridX(  1           , DIM_GRID_Y  , DIM_GRID_Z );
     dim3 dimGridY(  DIM_GRID_X  , 1           , DIM_GRID_Z );
     dim3 dimGridZ(  DIM_GRID_X  , DIM_GRID_Y  , 1          );
@@ -285,8 +332,8 @@ int main()
     cudaMalloc((void**)&devState,   size);  cudaMemset(devState,   0, size);
 
     // Define grid/block structure
-    dim3 dimGrid(   DIM_GRID_X  , DIM_GRID_Y  , DIM_GRID_Z );
-    dim3 dimBlock(  DIM_BLOCK_X , DIM_BLOCK_Y , DIM_BLOCK_Z);
+    dim3 dimGrid(  DIM_GRID_X  , DIM_GRID_Y  , DIM_GRID_Z );
+    dim3 dimBlock( DIM_BLOCK_X , DIM_BLOCK_Y , DIM_BLOCK_Z);
 
     // Initialize Fields
     cout << "Initialized Data: " << Nx << "x" << Ny << "x" << Nz << endl;
@@ -294,7 +341,7 @@ int main()
 
     // Initialize Random seed
     cout << "Initialize Random Seed.." << endl;
-    InitializeRandomNumbers<<< dimGrid, dimBlock >>>(devState);
+    //InitializeRandomNumbers<<< dimGrid, dimBlock >>>(devState);
     cudaDeviceSynchronize();
 
     // Start run time measurement

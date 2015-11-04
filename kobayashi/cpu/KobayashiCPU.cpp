@@ -125,7 +125,7 @@ double Laplace(double* field, int i, int j, int k)
 
 void CalcTimeStep(double* Phi, double* PhiDot, double* Temp, double* TempDot)
 {
-    // Calculate PhiDot and TempDot 
+    // Calculate PhiDot and TempDot
     #pragma omp parallel for schedule(auto) collapse(2)
     for (int i = BCELLS; i < Nx + BCELLS; i++)
     for (int j = BCELLS; j < Ny + BCELLS; j++)
@@ -176,16 +176,9 @@ void ApplyTimeStep(double* Phi, double* PhiDot, double* Temp, double* TempDot)
     {
         int locIndex = Index(i,j,k);
 
-        if (PhiDot[locIndex] != 0.0)
-        {
-            // Update phase field
-            Phi   [locIndex] += dt * PhiDot [locIndex];
-            PhiDot[locIndex]  = 0.0;
-
-            // Limit phase field
-            if      (Phi[locIndex] <     PhiPrecision) Phi[locIndex] = 0.0;
-            else if (Phi[locIndex] > 1 - PhiPrecision) Phi[locIndex] = 1.0;
-        }
+        // Update phase field
+        Phi    [locIndex] += dt * PhiDot [locIndex];
+        PhiDot [locIndex]  = 0.0;
         Temp   [locIndex] += dt * TempDot[locIndex];
         TempDot[locIndex]  = 0.0;
     }
@@ -238,7 +231,7 @@ int main()
     size_t size = numElements * sizeof(double);
 
     // Define and allocate host memory
-    double* Phi     = (double *)malloc(size);  memset(Phi,     0, size); 
+    double* Phi     = (double *)malloc(size);  memset(Phi,     0, size);
     double* PhiDot  = (double *)malloc(size);  memset(PhiDot,  0, size);
     double* Temp    = (double *)malloc(size);  memset(Temp,    0, size);
     double* TempDot = (double *)malloc(size);  memset(TempDot, 0, size);

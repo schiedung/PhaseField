@@ -191,16 +191,9 @@ void ApplyTimeStep(double* Phi, double* PhiDot, double* Temp, double* TempDot)
 
         int locIndex = Index(i,j,k);
 
-        if (PhiDot[locIndex] != 0.0)
-        {
-            // Update phase field
-            Phi   [locIndex] += dt * PhiDot [locIndex];
-            PhiDot[locIndex]  = 0.0;
-
-            // Limit phase field
-            if      (Phi[locIndex] <     PhiPrecision) Phi[locIndex] = 0.0;
-            else if (Phi[locIndex] > 1 - PhiPrecision) Phi[locIndex] = 1.0;
-        }
+        // Update phase field
+        Phi    [locIndex] += dt * PhiDot [locIndex];
+        PhiDot [locIndex]  = 0.0;
         Temp   [locIndex] += dt * TempDot[locIndex];
         TempDot[locIndex]  = 0.0;
 }
