@@ -2,8 +2,8 @@
 *.swp
 *.new
 *.o
-kobayashi/cpu/KobayashiCPU
-kobayashi/gpu/KobayashiGPU
-mobility/cpu/PhaseFieldCPU
-mobility/gpu/PhaseField
+KobayashiCPU
+KobayashiGPU
+PhaseFieldCPU
+PhaseField
 tags
