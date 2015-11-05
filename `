@@ -29,9 +29,9 @@ using namespace std;
 #define DIM_GRID_Z  16
 
 // Define computation domain size
-const int Nx = DIM_GRID_X * DIM_BLOCK_X;  // Domain size in x-direction
-const int Ny = DIM_GRID_Y * DIM_BLOCK_Y;  // Domain size in y-direction
-const int Nz = DIM_GRID_Z * DIM_BLOCK_Z;  // Domain size in z-direction
+const int Nx = DIM_GRID_X * DIM_BLOCK_X; // Domain size in x-direction
+const int Ny = DIM_GRID_Y * DIM_BLOCK_Y; // Domain size in y-direction
+const int Nz = DIM_GRID_Z * DIM_BLOCK_Z; // Domain size in z-direction
 
 // Define memory size
 const int Mx = Nx + 2 * BCELLS;  // Memory size in x-direction
@@ -41,7 +41,7 @@ const int Mz = Nz + 2 * BCELLS;  // Memory size in z-direction
 // Define number of time steps
 const int Nt     = 2000; // Number of time steps
 const int tOut   = 100;  // Output distance in time steps
-bool WriteToDisk = false;
+bool WriteToDisk = true;
 
 // Define grid spacing
 __constant__ double dt = 1.0e-4;  // Size of time step [s]
@@ -68,6 +68,7 @@ const int seed = 123; // Random number seed
 void WriteToFile(const int tStep, double* field, string name);
 __global__ void InitializeRandomNumbers( curandState *state);
 
+// Calculates the 1d memory index at certain grind point (i,j,k)
 __host__ __device__
 inline int Index(int i, int j, int k)
 {
@@ -88,7 +89,7 @@ void InitializeSupercooledSphere(double* Phi, double* PhiDot, double* Temp,
     int i = blockIdx.x * blockDim.x + threadIdx.x + BCELLS;
     int j = blockIdx.y * blockDim.y + threadIdx.y + BCELLS;
     int k = blockIdx.z * blockDim.z + threadIdx.z + BCELLS;
-
+    {
         int locIndex = Index(i,j,k);
         // Initialize the phase Field
         double r = sqrt(pow(i*dx-x0,2) + pow(j*dy-y0,2) + pow(k*dz-z0,2));
@@ -105,7 +106,7 @@ void InitializeSupercooledSphere(double* Phi, double* PhiDot, double* Temp,
 
         PhiDot [locIndex] = 0.0;
         TempDot[locIndex] = 0.0;
-
+    }
 }
 
 // Laplace operator
@@ -141,7 +142,7 @@ void CalcTimeStep(double* Phi, double* PhiDot, double* Temp, double* TempDot, cu
     int i = blockIdx.x * blockDim.x + threadIdx.x + BCELLS;
     int j = blockIdx.y * blockDim.y + threadIdx.y + BCELLS;
     int k = blockIdx.z * blockDim.z + threadIdx.z + BCELLS;
-
+    {
         int locIndex     = Index(i,j,k);
         double locPhiDot = 0.0;
         double locPhi    = Phi[locIndex];
@@ -168,14 +169,14 @@ void CalcTimeStep(double* Phi, double* PhiDot, double* Temp, double* TempDot, cu
 
             // Add driving force to PhiDot
             locPhiDot += locPhi*(1.0 - locPhi)*(locPhi - 0.5 + m + noise);
-        }
+
         // Calculate Laplacian-term
         locPhiDot += pow(epsilon,2) * Laplace(Phi,i,j,k);
         locPhiDot /= tau;
 
         PhiDot [locIndex] += locPhiDot;
         TempDot[locIndex] += Laplace(Temp,i,j,k) + kappa * locPhiDot;
-
+    }
 }
 
 __global__
@@ -185,7 +186,7 @@ void ApplyTimeStep(double* Phi, double* PhiDot, double* Temp, double* TempDot)
     int i = blockIdx.x * blockDim.x + threadIdx.x + BCELLS;
     int j = blockIdx.y * blockDim.y + threadIdx.y + BCELLS;
     int k = blockIdx.z * blockDim.z + threadIdx.z + BCELLS;
-
+    {
         int locIndex = Index(i,j,k);
 
         // Update fields
@@ -193,7 +194,7 @@ void ApplyTimeStep(double* Phi, double* PhiDot, double* Temp, double* TempDot)
         PhiDot [locIndex]  = 0.0;
         Temp   [locIndex] += dt * TempDot[locIndex];
         TempDot[locIndex]  = 0.0;
-
+    }
 }
 
 __global__
@@ -203,10 +204,10 @@ void SetBoundariesX(double* field)
     int b = blockIdx.x * blockDim.x + threadIdx.x;
     int j = blockIdx.y * blockDim.y + threadIdx.y;
     int k = blockIdx.z * blockDim.z + threadIdx.z;
-
+    {
         field[Index(b     ,j,k)] = field[Index(BCELLS+Nx-1-b,j,k)];
         field[Index(Mx-1-b,j,k)] = field[Index(BCELLS   -1+b,j,k)];
-
+    }
 }
 
 __global__
@@ -216,10 +217,10 @@ void SetBoundariesY(double* field)
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     int b = blockIdx.y * blockDim.y + threadIdx.y;
     int k = blockIdx.z * blockDim.z + threadIdx.z;
-
+    {
         field[Index(i,b     ,k)] = field[Index(i,BCELLS+Ny-1-b,k)];
         field[Index(i,My-1-b,k)] = field[Index(i,BCELLS   -1+b,k)];
-
+    }
 }
 
 __global__
@@ -229,10 +230,10 @@ void SetBoundariesZ(double* field)
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     int j = blockIdx.y * blockDim.y + threadIdx.y;
     int b = blockIdx.z * blockDim.z + threadIdx.z;
-
+    {
         field[Index(i,j,b     )] = field[Index(i,j,BCELLS+Nz-1-b)];
         field[Index(i,j,Mz-1-b)] = field[Index(i,j,BCELLS   -1+b)];
-
+    }
 }
 
 __host__
@@ -244,9 +245,9 @@ void SetBoundaries(double* field)
     dim3 dimGridY(  Mx , 1  , 1  );
     dim3 dimGridZ(  1  , My , 1  );
 
-    dim3 dimBlockX( BCELLS  , My , 1 );
-    dim3 dimBlockY( 1  , BCELLS  , Mz);
-    dim3 dimBlockZ( Mx , 1  , BCELLS );
+    dim3 dimBlockX( BCELLS , My     , 1      );
+    dim3 dimBlockY( 1      , BCELLS , Mz     );
+    dim3 dimBlockZ( Mx     , 1      , BCELLS );
 
     // Set Boundary conditions
     SetBoundariesX<<< dimGridX, dimBlockX >>>(field);

@@ -36,29 +36,30 @@ const int tOut   = 100;  // Output distance in time steps
 bool WriteToDisk = false;
 
 // Define grid spacing
-const double dx = 0.03;   // Grid spacing in x-direction [m]
-const double dy = 0.03;   // Grid spacing in y-direction [m]
-const double dz = 0.03;   // Grid spacing in z-direction [m]
-const double dt = 1.0e-4; // Size of time step [s]
+const double dt = 1.0e-4;  // Size of time step [s]
+const double dx = 3.0e-2;  // Grid spacing in x-direction [m]
+const double dy = 3.0e-2;  // Grid spacing in y-direction [m]
+const double dz = 3.0e-2;  // Grid spacing in z-direction [m]
 
 // Kobayashi's parameters (not exactly his..)
-const double epsilon = 0.010;   // Gradient energy coefficient
-const double tau     = 3.0e-4;  // Inverse of interface mobility [s]
-const double alpha   = 0.8;     // Coefficient of driving force
-const double Gamma   = 10.0;    // Coefficient of driving force
-const double delta   = 0.10;    // Anisotropy in (0,1)
-const double K       = 1.7;     // Referrers to latent heat (no-dimension)
-const double T0      = 0.0;     // Initial temperature
-const double Tm      = 1.0;     // Equilibrium temperature  (no-dimension)
-const double ampl    = 0.01;    // Amplitude of noise
-const int    seed    = 123;     // Random number seed
+const double Gamma     = 10.0;    // Coefficient of driving force
+const double Precision = 1.e-9;   // Calculation precision
+const double Radius    = 0.4;     // Initial radius of spherical grain
+const double T0        = 0.0;     // Initial temperature
+const double Tm        = 1.0;     // Equilibrium temperature  (no-dimension)
+const double alpha     = 0.8;     // Coefficient of driving force
+const double ampl      = 0.01;    // Amplitude of noise
+const double delta     = 0.10;    // Anisotropy in (0,1)
+const double epsilon   = 0.010;   // Gradient energy coefficient
+const double kappa     = 1.7;     // Referrers to latent heat (no-dimension)
+const double tau       = 3.0e-4;  // Inverse of interface mobility [s]
 
 // Misc parameters
-const double Radius        = 0.4;    // Initial radius of spherical grain
-const double PhiPrecision  = 1.e-9;  // Phase-field cut off
+const int seed = 123; // Random number seed
 
 void WriteToFile(const int tStep, double* field, string name);
 
+// Calculates the 1d memory index at certain grind point (i,j,k)
 inline int Index(int i, int j, int k)
 {
     // Define index of the memory
@@ -69,9 +70,9 @@ void InitializeSupercooledSphere(double* Phi, double* PhiDot, double* Temp,
         double* TempDot)
 {
     // Initialization
-    const double  x0 = Nx/2 * dx;
-    const double  y0 = Ny/2 * dy;
-    const double  z0 = Nz/2 * dz;
+    const double x0 = Nx/2 * dx;
+    const double y0 = Ny/2 * dy;
+    const double z0 = Nz/2 * dz;
 
     #pragma omp parallel for schedule(auto) collapse(2)
     for (int i = BCELLS; i < Nx + BCELLS; i++)
@@ -81,15 +82,15 @@ void InitializeSupercooledSphere(double* Phi, double* PhiDot, double* Temp,
         int locIndex = Index(i,j,k);
         // Initialize the phase Field
         double r = sqrt(pow(i*dx-x0,2) + pow(j*dy-y0,2) + pow(k*dz-z0,2));
-        if ( r < Radius)
+        if (r < Radius)
         {
-            Phi    [locIndex] = 1.0;
-            Temp   [locIndex] = Tm;
+            Phi [locIndex] = 1.0;
+            Temp[locIndex] = Tm;
         }
         else
         {
-            Phi    [locIndex] = 0.0;
-            Temp   [locIndex] = T0;
+            Phi [locIndex] = 0.0;
+            Temp[locIndex] = T0;
         }
 
         PhiDot [locIndex] = 0.0;
@@ -125,7 +126,6 @@ double Laplace(double* field, int i, int j, int k)
 
 void CalcTimeStep(double* Phi, double* PhiDot, double* Temp, double* TempDot)
 {
-    // Calculate PhiDot and TempDot
     #pragma omp parallel for schedule(auto) collapse(2)
     for (int i = BCELLS; i < Nx + BCELLS; i++)
     for (int j = BCELLS; j < Ny + BCELLS; j++)
@@ -135,7 +135,7 @@ void CalcTimeStep(double* Phi, double* PhiDot, double* Temp, double* TempDot)
         double locPhiDot = 0.0;
         double locPhi    = Phi[locIndex];
         // Calculate driving force m
-        if ((locPhi > 0.0) or  (locPhi < 1.0))
+        if ((locPhi > Precision) or  (locPhi < 1.0 - Precision))
         {
             // Calculate gradient of Phi
             double gradX = (Phi[Index(i+1,j,k)] - Phi[Index(i-1,j,k)])/(2*dx);
@@ -163,7 +163,7 @@ void CalcTimeStep(double* Phi, double* PhiDot, double* Temp, double* TempDot)
         locPhiDot /= tau;
 
         PhiDot [locIndex] += locPhiDot;
-        TempDot[locIndex] += Laplace(Temp,i,j,k) + K * locPhiDot;
+        TempDot[locIndex] += Laplace(Temp,i,j,k) + kappa * locPhiDot;
     }
 }
 
@@ -176,7 +176,7 @@ void ApplyTimeStep(double* Phi, double* PhiDot, double* Temp, double* TempDot)
     {
         int locIndex = Index(i,j,k);
 
-        // Update phase field
+        // Update fields
         Phi    [locIndex] += dt * PhiDot [locIndex];
         PhiDot [locIndex]  = 0.0;
         Temp   [locIndex] += dt * TempDot[locIndex];
@@ -187,33 +187,36 @@ void ApplyTimeStep(double* Phi, double* PhiDot, double* Temp, double* TempDot)
 void SetBoundariesX(double* field)
 {
     #pragma omp parallel for schedule(auto) collapse(1)
-    for (int j = 0; j < My; j++)
-    for (int k = 0; k < Mz; k++)
+    for (int b = 0; b < BCELLS; b++)
+    for (int j = 0; j < My;     j++)
+    for (int k = 0; k < Mz;     k++)
     {
-        field[Index(0 ,j,k)] = field[Index(1   ,j,k)];
-        field[Index(Nx,j,k)] = field[Index(Nx-1,j,k)];
+        field[Index(b     ,j,k)] = field[Index(BCELLS+Nx-1-b,j,k)];
+        field[Index(Mx-1-b,j,k)] = field[Index(BCELLS   -1+b,j,k)];
     }
 }
 
 void SetBoundariesY(double* field)
 {
     #pragma omp parallel for schedule(auto) collapse(1)
-    for (int i = 0; i < Mx; i++)
-    for (int k = 0; k < Mz; k++)
+    for (int i = 0; i < Mx;     i++)
+    for (int b = 0; b < BCELLS; b++)
+    for (int k = 0; k < Mz;     k++)
     {
-        field[Index(i,0 ,k)] = field[Index(i,1   ,k)];
-        field[Index(i,Ny,k)] = field[Index(i,Ny-1,k)];
+        field[Index(i,b     ,k)] = field[Index(i,BCELLS+Ny-1-b,k)];
+        field[Index(i,My-1-b,k)] = field[Index(i,BCELLS   -1+b,k)];
     }
 }
 
 void SetBoundariesZ(double* field)
 {
     #pragma omp parallel for schedule(auto) collapse(1)
-    for (int i = 0; i < Mx; i++)
-    for (int j = 0; j < My; j++)
+    for (int i = 0; i < Mx;     i++)
+    for (int j = 0; j < My;     j++)
+    for (int b = 0; b < BCELLS; b++)
     {
-        field[Index(i,j,0 )] = field[Index(i,j,1   )];
-        field[Index(i,j,Nz)] = field[Index(i,j,Nz-1)];
+        field[Index(i,j,b     )] = field[Index(i,j,BCELLS+Nz-1-b)];
+        field[Index(i,j,Mz-1-b)] = field[Index(i,j,BCELLS   -1+b)];
     }
 }
 
@@ -257,7 +260,7 @@ int main()
             cout << "Time step: " << tStep << "/" << Nt << endl;
             if (WriteToDisk)
             {
-                WriteToFile(tStep, Phi,  "Phase-Field");
+                WriteToFile(tStep, Phi,  "PhaseField");
                 WriteToFile(tStep, Temp, "Temperature");
             }
         }
@@ -273,9 +276,9 @@ int main()
 
     // Stop run time measurement
     gettimeofday(&end, NULL);
-    double delta = ((end.tv_sec  - start.tv_sec) * 1000000u
+    double simTime = ((end.tv_sec  - start.tv_sec) * 1000000u
             + end.tv_usec - start.tv_usec) / 1.e6;
-    cout << "Calculation time for " << Nt << " time step: " << delta << " s" << endl;
+    cout << "Calculation time for " << Nt << " time step: " << simTime << " s" << endl;
 
     // Cleanup
     free(Phi);
@@ -316,7 +319,7 @@ void WriteToFile(const int tStep, double* field, string name)
     for (int j = BCELLS; j < Ny + BCELLS; ++j)
     for (int i = BCELLS; i < Nx + BCELLS; ++i)
     {
-        int locIndex = (k * My + j) * Mx + i;
+        int locIndex = Index(i,j,k);
         vtk_file << field[locIndex] << endl;
     }
     vtk_file.close();
