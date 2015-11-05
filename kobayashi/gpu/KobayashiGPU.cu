@@ -38,45 +38,41 @@ const int Mx = Nx + 2 * BCELLS;  // Memory size in x-direction
 const int My = Ny + 2 * BCELLS;  // Memory size in y-direction
 const int Mz = Nz + 2 * BCELLS;  // Memory size in z-direction
 
-__device__ __constant__ int devMx = DIM_GRID_X * DIM_BLOCK_X + 2 * BCELLS;
-__device__ __constant__ int devMy = DIM_GRID_Y * DIM_BLOCK_Y + 2 * BCELLS;
-__device__ __constant__ int devMz = DIM_GRID_Z * DIM_BLOCK_Z + 2 * BCELLS;
-
 // Define number of time steps
 const int Nt     = 2000; // Number of time steps
 const int tOut   = 100;  // Output distance in time steps
-bool WriteToDisk = false;
+bool WriteToDisk = true;
 
 // Define grid spacing
-__device__ __constant__ double dx = 0.03;    // Grid spacing in x-direction [m]
-__device__ __constant__ double dy = 0.03;    // Grid spacing in y-direction [m]
-__device__ __constant__ double dz = 0.03;    // Grid spacing in z-direction [m]
-__device__ __constant__ double dt = 1.0e-4;  // Size of time step [s]
+__constant__ double dt = 1.0e-4;  // Size of time step [s]
+__constant__ double dx = 3.0e-2;  // Grid spacing in x-direction [m]
+__constant__ double dy = 3.0e-2;  // Grid spacing in y-direction [m]
+__constant__ double dz = 3.0e-2;  // Grid spacing in z-direction [m]
 
 // Kobayashi's parameters (not exactly his..)
-__device__ __constant__ double epsilon = 0.010;   // Gradient energy coefficient
-__device__ __constant__ double tau     = 3.0e-4;  // Inverse of interface mobility [s]
-__device__ __constant__ double alpha   = 0.8;     // Coefficient of driving force
-__device__ __constant__ double Gamma   = 10.0;    // Coefficient of driving force
-__device__ __constant__ double delta   = 0.10;    // Anisotropy in (0,1)
-__device__ __constant__ double K       = 1.7;     // Referrers to latent heat (no-dimension)
-__device__ __constant__ double T0      = 0.0;     // Initial temperature
-__device__ __constant__ double Tm      = 1.0;     // Equilibrium temperature  (no-dimension)
-__device__ __constant__ double ampl    = 0.01;    // Amplitude of noise
-__device__ __constant__ int    seed    = 123;     // Random number seed
+__constant__ double Gamma   = 10.0;    // Coefficient of driving force
+__constant__ double T0      = 0.0;     // Initial temperature
+__constant__ double Tm      = 1.0;     // Equilibrium temperature  (no-dimension)
+__constant__ double alpha   = 0.8;     // Coefficient of driving force
+__constant__ double ampl    = 0.01;    // Amplitude of noise
+__constant__ double delta   = 0.10;    // Anisotropy in (0,1)
+__constant__ double epsilon = 0.010;   // Gradient energy coefficient
+__constant__ double kappa   = 1.7;     // Referrers to latent heat (no-dimension)
+__constant__ double tau     = 3.0e-4;  // Inverse of interface mobility [s]
 
 // Misc parameters
-__device__ __constant__ double Radius        = 0.4;    // Initial radius of spherical grain
-__device__ __constant__ double PhiPrecision  = 1.e-9;  // Phase-field cut off
+       const int    seed          = 123;    // Random number seed
+__constant__ double PhiPrecision  = 1.e-9;  // Phase-field cut off
+__constant__ double Radius        = 0.4;    // Initial radius of spherical grain
 
 void WriteToFile(const int tStep, double* field, string name);
 __global__ void InitializeRandomNumbers( curandState *state);
 
-__device__
+__host__ __device__
 inline int Index(int i, int j, int k)
 {
     // Define index of the memory
-    return (k * devMy + j) * devMx + i;
+    return (k * My + j) * Mx + i;
 }
 
 __global__
@@ -177,7 +173,7 @@ void CalcTimeStep(double* Phi, double* PhiDot, double* Temp, double* TempDot, cu
         locPhiDot /= tau;
 
         PhiDot [locIndex] += locPhiDot;
-        TempDot[locIndex] += Laplace(Temp,i,j,k) + K * locPhiDot;
+        TempDot[locIndex] += Laplace(Temp,i,j,k) + kappa * locPhiDot;
 
 }
 
@@ -305,7 +301,7 @@ int main()
             cout << "Time step: " << tStep << "/" << Nt << endl;
             if (WriteToDisk)
             {
-                WriteToFile(tStep, Phi,  "Phase-Field");
+                WriteToFile(tStep, Phi,  "PhaseField");
                 WriteToFile(tStep, Temp, "Temperature");
             }
         }
@@ -382,7 +378,7 @@ void WriteToFile(const int tStep, double* field, string name)
     for (int j = BCELLS; j < Ny + BCELLS; ++j)
     for (int i = BCELLS; i < Nx + BCELLS; ++i)
     {
-        int locIndex = (k * My + j) * Mx + i;
+        int locIndex = Index(i,j,k);
         vtk_file << field[locIndex] << endl;
     }
     vtk_file.close();
