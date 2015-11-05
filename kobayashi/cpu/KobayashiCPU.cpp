@@ -11,6 +11,7 @@
 #include <fstream>
 #include <iostream>
 #include <omp.h>
+#include <random>
 #include <sstream>
 #include <string.h>
 #include <sys/time.h>
@@ -54,10 +55,9 @@ const double epsilon   = 0.010;   // Gradient energy coefficient
 const double kappa     = 1.7;     // Referrers to latent heat (no-dimension)
 const double tau       = 3.0e-4;  // Inverse of interface mobility [s]
 
-// Misc parameters
-const int seed = 123; // Random number seed
-
 void WriteToFile(const int tStep, double* field, string name);
+std::default_random_engine generator;
+std::normal_distribution<double> distribution(0.0,0.5);
 
 // Calculates the 1d memory index at certain grind point (i,j,k)
 inline int Index(int i, int j, int k)
@@ -150,7 +150,7 @@ void CalcTimeStep(double* Phi, double* PhiDot, double* Temp, double* TempDot)
             double sigma = (1.-4.*delta*(1.-theta));
 
             // Calculate noise
-            double noise = ampl * rand()/RAND_MAX;
+            double noise = ampl *  distribution(generator);
 
             // Calculate driving force am
             double m = (alpha/M_PI) * atan(Gamma*(Tm - Temp[locIndex])*sigma);
@@ -187,9 +187,9 @@ void ApplyTimeStep(double* Phi, double* PhiDot, double* Temp, double* TempDot)
 void SetBoundariesX(double* field)
 {
     #pragma omp parallel for schedule(auto) collapse(1)
-    for (int b = 0; b < BCELLS; b++)
     for (int j = 0; j < My;     j++)
     for (int k = 0; k < Mz;     k++)
+    for (int b = 0; b < BCELLS; b++)
     {
         field[Index(b     ,j,k)] = field[Index(BCELLS+Nx-1-b,j,k)];
         field[Index(Mx-1-b,j,k)] = field[Index(BCELLS   -1+b,j,k)];
@@ -200,8 +200,8 @@ void SetBoundariesY(double* field)
 {
     #pragma omp parallel for schedule(auto) collapse(1)
     for (int i = 0; i < Mx;     i++)
-    for (int b = 0; b < BCELLS; b++)
     for (int k = 0; k < Mz;     k++)
+    for (int b = 0; b < BCELLS; b++)
     {
         field[Index(i,b     ,k)] = field[Index(i,BCELLS+Ny-1-b,k)];
         field[Index(i,My-1-b,k)] = field[Index(i,BCELLS   -1+b,k)];
@@ -242,10 +242,6 @@ int main()
     // Initialize Fields
     cout << "Initialized Data: " << Nx << "x" << Ny << "x" << Nz << endl;
     InitializeSupercooledSphere(Phi, PhiDot, Temp, PhiDot);
-
-    // Initialize Random seed
-    cout << "Initialize Random Seed.." << endl;
-    srand(seed);
 
     // Start run time measurement
     struct timeval start, end;

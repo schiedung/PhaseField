@@ -3,7 +3,7 @@ PROG = KobayashiCPU
 MAIN = KobayashiCPU.cpp
 
 CC      = g++    # Use the g++ Compiler
-STDLIBS = -lm  -fopenmp  # Link the math library
+STDLIBS = -std=c++11 -lm  -fopenmp  # Link the math library
 CFLAGS  = -O
 
 all: $(PROG)
