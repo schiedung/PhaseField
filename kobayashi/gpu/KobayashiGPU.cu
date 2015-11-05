@@ -50,20 +50,20 @@ __constant__ double dy = 3.0e-2;  // Grid spacing in y-direction [m]
 __constant__ double dz = 3.0e-2;  // Grid spacing in z-direction [m]
 
 // Kobayashi's parameters (not exactly his..)
-__constant__ double Gamma   = 10.0;    // Coefficient of driving force
-__constant__ double T0      = 0.0;     // Initial temperature
-__constant__ double Tm      = 1.0;     // Equilibrium temperature  (no-dimension)
-__constant__ double alpha   = 0.8;     // Coefficient of driving force
-__constant__ double ampl    = 0.01;    // Amplitude of noise
-__constant__ double delta   = 0.10;    // Anisotropy in (0,1)
-__constant__ double epsilon = 0.010;   // Gradient energy coefficient
-__constant__ double kappa   = 1.7;     // Referrers to latent heat (no-dimension)
-__constant__ double tau     = 3.0e-4;  // Inverse of interface mobility [s]
+__constant__ double Gamma     = 10.0;    // Coefficient of driving force
+__constant__ double Precision = 1.e-9;   // Calculation precision
+__constant__ double Radius    = 0.4;     // Initial radius of spherical grain
+__constant__ double T0        = 0.0;     // Initial temperature
+__constant__ double Tm        = 1.0;     // Equilibrium temperature  (no-dimension)
+__constant__ double alpha     = 0.8;     // Coefficient of driving force
+__constant__ double ampl      = 0.01;    // Amplitude of noise
+__constant__ double delta     = 0.10;    // Anisotropy in (0,1)
+__constant__ double epsilon   = 0.010;   // Gradient energy coefficient
+__constant__ double kappa     = 1.7;     // Referrers to latent heat (no-dimension)
+__constant__ double tau       = 3.0e-4;  // Inverse of interface mobility [s]
 
 // Misc parameters
-       const int    seed          = 123;    // Random number seed
-__constant__ double PhiPrecision  = 1.e-9;  // Phase-field cut off
-__constant__ double Radius        = 0.4;    // Initial radius of spherical grain
+const int seed = 123; // Random number seed
 
 void WriteToFile(const int tStep, double* field, string name);
 __global__ void InitializeRandomNumbers( curandState *state);
@@ -80,9 +80,9 @@ void InitializeSupercooledSphere(double* Phi, double* PhiDot, double* Temp,
         double* TempDot)
 {
     // Initialization
-    const double  x0 = Nx/2 * dx;
-    const double  y0 = Ny/2 * dy;
-    const double  z0 = Nz/2 * dz;
+    const double x0 = Nx/2 * dx;
+    const double y0 = Ny/2 * dy;
+    const double z0 = Nz/2 * dz;
 
     // Define indices of the device memory
     int i = blockIdx.x * blockDim.x + threadIdx.x + BCELLS;
@@ -92,15 +92,15 @@ void InitializeSupercooledSphere(double* Phi, double* PhiDot, double* Temp,
         int locIndex = Index(i,j,k);
         // Initialize the phase Field
         double r = sqrt(pow(i*dx-x0,2) + pow(j*dy-y0,2) + pow(k*dz-z0,2));
-        if ( r < Radius)
+        if (r < Radius)
         {
-            Phi    [locIndex] = 1.0;
-            Temp   [locIndex] = Tm;
+            Phi [locIndex] = 1.0;
+            Temp[locIndex] = Tm;
         }
         else
         {
-            Phi    [locIndex] = 0.0;
-            Temp   [locIndex] = T0;
+            Phi [locIndex] = 0.0;
+            Temp[locIndex] = T0;
         }
 
         PhiDot [locIndex] = 0.0;
@@ -145,7 +145,7 @@ void CalcTimeStep(double* Phi, double* PhiDot, double* Temp, double* TempDot, cu
         double locPhiDot = 0.0;
         double locPhi    = Phi[locIndex];
         // Calculate driving force m
-        if ((locPhi > 0.0) or  (locPhi < 1.0))
+        if ((locPhi > Precision) or  (locPhi < 1.0 - Precision))
         {
             // Calculate gradient of Phi
             double gradX = (Phi[Index(i+1,j,k)] - Phi[Index(i-1,j,k)])/(2*dx);
