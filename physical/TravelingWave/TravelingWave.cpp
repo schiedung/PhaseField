@@ -234,10 +234,11 @@ double CalcVariationDerivativePhi(double* Phi, double Temp, int i, int j, int k)
 
 double mu_effecitve(double Phi, double PhiDot, double GradPhiNormal, double Ts)
 {
-    double v = PhiDot * GradPhiNormal;
-    double x = eta/M_PI * acos(2.0 * Phi - 1.0);
-    double A = (Ts - temperature_steady_state(x,v,Ts))/v;
-    return mu/(1-A); 
+    //double v = PhiDot * GradPhiNormal;
+    //double x = eta/M_PI * acos(2.0 * Phi - 1.0);
+    //double A = (Ts - temperature_steady_state(x,v,Ts))/v;
+    //return mu/(1-A); 
+    return mu;
 }
 
 void CalcPhiDot(double* Phi, double* PhiDot, double* Temp)
@@ -249,49 +250,51 @@ void CalcPhiDot(double* Phi, double* PhiDot, double* Temp)
     {
         int    locIndex  = Index(i,j,k);
         double dF_dPhi   = CalcVariationDerivativePhi(Phi,Temp[locIndex],i,j,k);
+        double locPhi    = Phi[locIndex];
         double locPhiDot = mu * dF_dPhi;  // The normal local Phi_Dot
 
-        //if ((locPhi > 0) and (locPhi < 1))
-        //{
-        //    double locGradPhiNormal = df_dx(Phi,i,j,k);
-        //    double locPhi           = Phi [locIndex];
+        if ((locPhi > 0) and (locPhi < 1))
+        {
+            double locGradPhiNormal = df_dx(Phi,i,j,k);
+            double locPhi           = Phi [locIndex];
 
-        //    // TODO calculate local solid Temperature
-        //    double locTs = Tm;
+            // TODO calculate local solid Temperature
+            double locTs = Tm;
 
-        //    const double epsilonF     = 1.0e-10;
-        //    const double epsilonP     = 1.0e-10;
-        //    const int    MaxIteration = 100000;
-        //    int  iteration = 0;
-        //    bool iterate   = true;
+            double locPhiDotA = -1.0/dt;
+            double locPhiDotB =  1.0/dt;
 
-        //    double locPhiDotA = -1.0/dt;
-        //    double locPhiDotB =  1.0/dt;
+            double fa = mu_effecitve(locPhi, locPhiDotA, locGradPhiNormal, locTs) * dF_dPhi - locPhiDotA;
+            double fb = mu_effecitve(locPhi, locPhiDotB, locGradPhiNormal, locTs) * dF_dPhi - locPhiDotB;
+            double fc = mu_effecitve(locPhi, locPhiDot , locGradPhiNormal, locTs) * dF_dPhi - locPhiDot;
 
-        //    double fa = mu_effecitve(locPhi, locPhiDotA, locGradPhiNormal, locTs) * dF_dPhi - locPhiDotA;
-        //    double fb = mu_effecitve(locPhi, locPhiDotB, locGradPhiNormal, locTs) * dF_dPhi - locPhiDotB;
-        //    double fc = mu_effecitve(locPhi, locPhiDot , locGradPhiNormal, locTs) * dF_dPhi - locPhiDot;
+            // Start iterative algorithm
+            const double epsilonF     = 1.0e-10;
+            const double epsilonP     = 1.0e-10;
+            const int    MaxIteration = 100000;
+            int  iteration = 0;
+            bool iterate   = (fabs(fc) > epsilonF);
+            while (iterate)
+            {
+                  cout << fabs(fc) << endl;
+            //    if      (((fa > 0) and (fc > 0)) or((fa < 0) and (fc < 0))) locPhiDotA = locPhiDot;
+            //    else if (((fb > 0) and (fc > 0)) or((fb < 0) and (fc < 0))) locPhiDotB = locPhiDot;
+            //    else break;
 
-        //    while ((fabs(fc) > epsilonF) or (fabs(locPhiDotA-locPhiDotB) > epsilonP));
-        //    {
-        //        if      (((fa > 0) and (fc > 0)) or((fa < 0) and (fc < 0))) locPhiDotA = locPhiDot;
-        //        else if (((fb > 0) and (fc > 0)) or((fb < 0) and (fc < 0))) locPhiDotB = locPhiDot;
-        //        else break;
+            //    //locPhiDot = (locPhiDotA * fb - locPhiDotB * fa)/(fb - fa);
+            //    locPhiDot = 0.5 * (locPhiDotB + locPhiDotA);
+            //    fc = mu_effecitve(locPhi, locPhiDot , locGradPhiNormal, locTs) * dF_dPhi - locPhiDot;
 
-        //        //locPhiDot = (locPhiDotA * fb - locPhiDotB * fa)/(fb - fa);
-        //        locPhiDot = 0.5 * (locPhiDotB + locPhiDotA);
-        //        fc = mu_effecitve(locPhi, locPhiDot , locGradPhiNormal, locTs) * dF_dPhi - locPhiDot;
-
-        //        iteration ++;
-        //        if (iteration > MaxIteration) break;
-        //    }
-        //    while (iterate);
-        //}
+                iteration ++;
+                if (iteration > MaxIteration) break;
+                iterate = (fabs(fc) > epsilonF) xor (fabs(locPhiDotA-locPhiDotB) > epsilonP);
+            }
+        }
 
         // Limit phase field
-        double newPhi = Phi[locIndex] + dt * locPhiDot;
-        if (newPhi > 1.0) locPhiDot -= (newPhi-1.0)/dt;
-        if (newPhi < 0.0) locPhiDot -=  newPhi/dt;
+        //double newPhi = Phi[locIndex] + dt * locPhiDot;
+        //if (newPhi > 1.0) locPhiDot -= (newPhi-1.0)/dt;
+        //if (newPhi < 0.0) locPhiDot -=  newPhi/dt;
 
         // Calculate and write time derivatives into the device memory
         PhiDot [locIndex] += locPhiDot;
