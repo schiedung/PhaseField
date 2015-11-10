@@ -31,15 +31,16 @@ const int My = Ny + 2 * BCELLS;  // Memory size in y-direction
 const int Mz = Nz + 2 * BCELLS;  // Memory size in z-direction
 
 // Define number of time steps
-const int Nt     = 10000000; // Number of time steps
-const int tOut   = 100000;    // Output distance in time steps
+const int Nt                 = 100000000; // Number of time steps
+      int InterfacePosOut    = 20;
+      int InterfacePosOutInc = 5;
 bool WriteToDisk = true;
 
 // Define grid spacing
-const double dt = 1.0e-12;  // Size of time step [s]
-const double dx = 1.0e-6;  // Grid spacing in x-direction [m]
-const double dy = 1.0e-6;  // Grid spacing in y-direction [m]
-const double dz = 1.0e-6;  // Grid spacing in z-direction [m]
+double dt = 1.0e-13;  // Size of time step [s]
+double dx = 1.0e-7;  // Grid spacing in x-direction [m]
+double dy = 1.0e-7;  // Grid spacing in y-direction [m]
+double dz = 1.0e-7;  // Grid spacing in z-direction [m]
 
 // Some material parameters (aluminium)
 #define M   2.698150e-2  // Molar mass [Kg/mol]
@@ -49,20 +50,20 @@ const double dz = 1.0e-6;  // Grid spacing in z-direction [m]
 #define Tm  933.47       // Melting temperature
 
 // Physical parameters
-const double Ts     = Tm;         // Initial solid temperature [K]
+const double Ts     = Tm;             // Initial solid temperature [K]
 const double alpha0 = 3.52e-5;        // Thermal diffusivity [m2/s]
 const double alpha1 = 6.80e-5;        // Thermal diffusivity [m2/s]
 const double dS     = rho*dH/(Tm*M);  // Entropy of fusion [J/m3 K]
 const double delta  = 0.20;           // Anisotropy in (0,1)
-const double eta    = 1.0e-5;         // Interface width [m]
+      double eta    = 10 * dx;        // Interface width [m]
 const double kappa  = M*dH/(cp);      // Latent heat parameter [K]
 const double mu     = 1.0e-5;         // Interface mobility [m2/J s]
 const double sigma0 = 0.55;           // Interface energy [J/m2]
 
 // Misc parameters
-const double Precision = 1.e-6;   // Phase-field cut off
-const double ampl      = 0.01;    // Amplitude of noise
-const double Radius    = 5.0e-5;  // Initial radius of spherical grain
+const double Precision = 1.e-6;     // Phase-field cut off
+const double ampl      = 0.01;      // Amplitude of noise
+      double Radius    = 0.1*Nx*dx;// Initial radius of spherical grain
 
 void WriteToFile(const int tStep, double* field, string name);
 std::default_random_engine generator;
@@ -110,7 +111,7 @@ void InitializePlanarFront(double* Phi, double* PhiDot, double* Temp,
     for (int j = BCELLS; j < Ny + BCELLS; j++)
     for (int k = BCELLS; k < Nz + BCELLS; k++)
     {
-        double velocity = 50;
+        double velocity = 1000;
         int locIndex = Index(i,j,k);
         // Initialize the phase Field
         double x = i*dx - Radius;
@@ -122,12 +123,12 @@ void InitializePlanarFront(double* Phi, double* PhiDot, double* Temp,
         else if (x < eta)
         {
             Phi [locIndex] = 0.5 + 0.5 * cos(M_PI / eta * x);
-            Temp[locIndex] = temperature_steady_state(x,velocity);
+            Temp[locIndex] = Tm-kappa;//temperature_steady_state(x,velocity);
         }
         else
         {
             Phi [locIndex] = 0.0;
-            Temp[locIndex] = temperature_steady_state(x,velocity);
+            Temp[locIndex] = Tm-kappa;//temperature_steady_state(x,velocity);
         }
 
         PhiDot [locIndex] = 0.0;
@@ -203,11 +204,12 @@ void CalcTimeStep(double* Phi, double* PhiDot, double* Temp, double* TempDot)
         double locTempDot = 0.0;
 
         // Calculate variation derivative of the DO-potential
-        if ((locPhi < 0.0) or (locPhi > 1.0))
-        {
-            locPhiDot  -= sigma0 * pow(M_PI/eta,2) * (locPhi - 0.5);
-        }
-        else if ((locPhi > 0) and (locPhi < 1))
+        //if ((locPhi < 0.0) or (locPhi > 1.0))
+        //{
+        //    locPhiDot  -= sigma0 * pow(M_PI/eta,2) * (locPhi - 0.5);
+        //}
+        //else if ((locPhi > 0) and (locPhi < 1))
+        if ((locPhi > 0) and (locPhi < 1))
         {
             // Calculate and apply the driving force
             double qPhi = locPhi * (1.0 - locPhi);
@@ -219,9 +221,9 @@ void CalcTimeStep(double* Phi, double* PhiDot, double* Temp, double* TempDot)
         locPhiDot  += sigma(Phi,i,j,k)  * Laplace(Phi,i,j,k);
         locPhiDot  *= mu;
 
-        //double newPhi = Phi[locIndex] + dt * locPhiDot;
-        //if (newPhi > 1.0) locPhiDot -= (newPhi-1.0)/dt;
-        //if (newPhi < 0.0) locPhiDot -=  newPhi/dt;
+        double newPhi = Phi[locIndex] + dt * locPhiDot;
+        if (newPhi > 1.0) locPhiDot -= (newPhi-1.0)/dt;
+        if (newPhi < 0.0) locPhiDot -=  newPhi/dt;
 
         // Calculate time derivative of the temperature
         locTempDot += alpha(locPhi) * Laplace(Temp,i,j,k) + kappa * locPhiDot;
@@ -258,17 +260,24 @@ void SetBoundariesX(double* field)
         double df1 = 0.0;
         double df2 = 0.0;
         double df3 = 0.0;
-        df1 -=     field[Index(1,j,k)];
-        df1 +=     field[Index(2,j,k)];
+        //df1 -=     field[Index(1,j,k)];
+        //df1 +=     field[Index(2,j,k)];
 
-        //df2 +=     field[Index(1,j,k)];
-        //df2 -= 2 * field[Index(2,j,k)];
-        //df2 +=     field[Index(3,j,k)];
+        df1 -= 137./60. * field[Index(1,j,k)];
+        df1 +=       5. * field[Index(2,j,k)];
+        df1 -=       5. * field[Index(3,j,k)];
+        df1 +=   10./3. * field[Index(4,j,k)];
+        df1 -=    5./4. * field[Index(5,j,k)];
+        df1 +=    1./5. * field[Index(6,j,k)];
 
-        //df3 -=     field[Index(1,j,k)];
-        //df3 += 3 * field[Index(2,j,k)];
-        //df3 -= 3 * field[Index(3,j,k)];
-        //df3 +=     field[Index(4,j,k)];
+        df2 +=     field[Index(1,j,k)];
+        df2 -= 2 * field[Index(2,j,k)];
+        df2 +=     field[Index(3,j,k)];
+
+        df3 -=     field[Index(1,j,k)];
+        df3 += 3 * field[Index(2,j,k)];
+        df3 -= 3 * field[Index(3,j,k)];
+        df3 +=     field[Index(4,j,k)];
 
         field[Index(0,j,k)] = field[Index(1,j,k)] - df1 + 0.5*df2 - 1./6.*df3;
     }
@@ -279,17 +288,24 @@ void SetBoundariesX(double* field)
         double df1 = 0.0;
         double df2 = 0.0;
         double df3 = 0.0;
-        df1 -=     field[Index(Mx-3,j,k)];
-        df1 +=     field[Index(Mx-2,j,k)];
+        //df1 -=     field[Index(Mx-3,j,k)];
+        //df1 +=     field[Index(Mx-2,j,k)];
 
-        //df2 +=     field[Index(Mx-3,j,k)];
-        //df2 -= 2 * field[Index(Mx-2,j,k)];
-        //df2 +=     field[Index(Mx-1,j,k)];
+        df1 -= 137./60. * field[Index(Mx-7,j,k)];
+        df1 +=       5. * field[Index(Mx-6,j,k)];
+        df1 -=       5. * field[Index(Mx-5,j,k)];
+        df1 +=   10./3. * field[Index(Mx-4,j,k)];
+        df1 -=    5./4. * field[Index(Mx-3,j,k)];
+        df1 +=    1./5. * field[Index(Mx-2,j,k)];
 
-        //df3 -=     field[Index(Mx-4,j,k)];
-        //df3 += 3 * field[Index(Mx-3,j,k)];
-        //df3 -= 3 * field[Index(Mx-2,j,k)];
-        //df3 +=     field[Index(Mx-1,j,k)];
+        df2 +=     field[Index(Mx-4,j,k)];
+        df2 -= 2 * field[Index(Mx-3,j,k)];
+        df2 +=     field[Index(Mx-2,j,k)];
+
+        df3 -=     field[Index(Mx-5,j,k)];
+        df3 += 3 * field[Index(Mx-4,j,k)];
+        df3 -= 3 * field[Index(Mx-3,j,k)];
+        df3 +=     field[Index(Mx-2,j,k)];
 
         field[Index(Mx-1,j,k)] = field[Index(Mx-2,j,k)] + df1 + 0.5*df2 + 1./6.*df3;
     }
@@ -350,7 +366,7 @@ int MeasureInterfaceWidth(double* Phi)
 int MeasureInterfacePosition(double* Phi)
 {
     int pos = 0;
-    for (int i = 0; i < Mx; i++)
+    for (int i = BCELLS; i < Mx; i++)
     if (Phi[Index(i,My/2,Mz/2)] < 0.5 )
     {
         pos = i;
@@ -359,8 +375,18 @@ int MeasureInterfacePosition(double* Phi)
     return pos;
 }
 
-int main()
+int main(int argc, char* argv[])
 {
+    // Read input parameters
+    if (argc > 3) dt = stod(argv[3]);
+    if (argc > 2)
+    {
+        dx = stod(argv[2]);
+        dy = stod(argv[2]);
+        dy = stod(argv[2]);
+    }
+    if (argc > 1) eta = stoi(argv[1]) * dx;
+    
     // Calculate memory size
     int numElements = Mx * My * Mz;
     size_t size = numElements * sizeof(double);
@@ -373,46 +399,55 @@ int main()
 
     // Initialize Fields
     cout << "Initialized Data: " << Nx << "x" << Ny << "x" << Nz << endl;
-    cout << "Initialized eta: " << int(eta/dx) << endl << endl;
+    cout << "Initialized eta:  " << int(eta/dx) << endl;
+    cout << "Initialized dt:   " << dt << endl;
+    cout << "Initialized dx:   " << dx << endl << endl;
     InitializePlanarFront(Phi, PhiDot, Temp, PhiDot);
+    WriteToFile(0, Phi,  "PhaseField");
+    WriteToFile(0, Temp, "Temperature");
 
     // Start run time measurement
     struct timeval start, end;
     gettimeofday(&start, NULL);
 
     // Initialize speed measurement
-    double PhiStart = MeasureInterfacePosition(Phi);
-    double PhiEnd   = MeasureInterfacePosition(Phi);
+    double xStart = MeasureInterfacePosition(Phi);
+    int    tStart = 0;
 
     // Start time loop
+    cout << "Start time loop.." << endl;
     for (int tStep = 0; tStep <= Nt; tStep++)
     {
-        // Make Output if necessary
-        if(tStep%tOut == 0)
+        const int InterfacePos = MeasureInterfacePosition(Phi)*100/Mx;
+        if (InterfacePos == InterfacePosOut)
         {
+            // Set new output position
+            InterfacePosOut += InterfacePosOutInc;
+
             // Measure interface-width
             double InterfaceWidth = MeasureInterfaceWidth(Phi);
 
             // Measure solidification speed
             double Speed = 0.0;
-            PhiEnd   = MeasureInterfacePosition(Phi);
-            Speed    = (PhiEnd-PhiStart)*dx/(tOut*dt);
-            PhiStart = PhiEnd;
-
-            // Stop simulation if the end is reached
-            if (PhiStart > Nx-eta) break; 
+            double DeltaT = (tStep - tStart) * dt;
+            double DeltaX = abs(InterfacePos - xStart) * dx;
+            Speed  = DeltaX/DeltaT;
+            xStart = InterfacePos;
+            tStart = tStep;
 
             // Make output to screen
-            cout << "Time step: " << tStep << "/" << Nt 
-                 << "; Eta: "   << InterfaceWidth 
-                 << "; IPos: "  << PhiEnd
-                 << "; Speed: " << Speed << endl;
+            cout << "[ " << InterfacePos << "% ]"
+                 << "  Eta: " << InterfaceWidth 
+                 << "  Speed: " << Speed << " m/s" << endl;
 
             if (WriteToDisk)
             {
-                WriteToFile(tStep, Phi,  "PhaseField");
-                WriteToFile(tStep, Temp, "Temperature");
+                WriteToFile(InterfacePos, Phi,  "PhaseField");
+                WriteToFile(InterfacePos, Temp, "Temperature");
             }
+
+            // Stop simulation if the end is reached
+            if (InterfacePosOut >= 80) break; 
         }
 
         // Set boundary conditions
