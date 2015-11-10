@@ -10,7 +10,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
-#include <omp.h>
+//#include <omp.h>
 #include <random>
 #include <sstream>
 #include <string.h>
@@ -50,7 +50,6 @@ double dz = 1.0e-7;  // Grid spacing in z-direction [m]
 #define Tm  933.47       // Melting temperature
 
 // Physical parameters
-const double Ts     = Tm;             // Initial solid temperature [K]
 const double alpha0 = 3.52e-5;        // Thermal diffusivity [m2/s]
 const double alpha1 = 6.80e-5;        // Thermal diffusivity [m2/s]
 const double dS     = rho*dH/(Tm*M);  // Entropy of fusion [J/m3 K]
@@ -76,7 +75,7 @@ inline int Index(int i, int j, int k)
     return (k * My + j) * Mx + i;
 }
 
-double temperature_steady_state(const double x, const double v)
+double temperature_steady_state(double x, double v, double Ts)
 {
     double A  = pow(M_PI*alpha0,2) / (pow(M_PI*alpha0,2) + pow(eta*v,2));
     double Tx = 0.0;
@@ -111,14 +110,14 @@ void InitializePlanarFront(double* Phi, double* PhiDot, double* Temp,
     for (int j = BCELLS; j < Ny + BCELLS; j++)
     for (int k = BCELLS; k < Nz + BCELLS; k++)
     {
-        double velocity = 1000;
+//        double velocity = 1000;
         int locIndex = Index(i,j,k);
         // Initialize the phase Field
         double x = i*dx - Radius;
         if (x < 0.0)
         {
             Phi [locIndex] = 1.0;
-            Temp[locIndex] = Ts;
+            Temp[locIndex] = Tm;
         }
         else if (x < eta)
         {
@@ -161,6 +160,22 @@ double Laplace(double* field, int i, int j, int k)
     return df2_dx2 + df2_dy2 + df2_dz2;
 }
 
+// derivative operator
+double df_dx(double* field, int i, int j, int k)
+{
+    return (field[Index(i+1,j,k)] - field[Index(i-1,j,k)])/(2*dx);
+}
+
+double df_dy(double* field, int i, int j, int k)
+{
+    return (field[Index(i,j+1,k)] - field[Index(i,j-1,k)])/(2*dy);
+}
+
+double df_dz(double* field, int i, int j, int k)
+{
+    return (field[Index(i,j,k+1)] - field[Index(i,j,k-1)])/(2*dz);
+}
+
 // Calculates the thermal diffusivity inside the interface
 inline double alpha(double Phi)
 {
@@ -170,71 +185,139 @@ inline double alpha(double Phi)
 // Calculates the interface energy
 double sigma(double *Phi, int i, int j, int k)
 {
-    double gradX = (Phi[Index(i+1,j,k)] - Phi[Index(i-1,j,k)])/(2*dx);
-    double gradY = (Phi[Index(i,j+1,k)] - Phi[Index(i,j-1,k)])/(2*dy);
-    double gradZ = (Phi[Index(i,j,k+1)] - Phi[Index(i,j,k-1)])/(2*dz);
-
-    double NormGrad = sqrt(pow(gradX,2) + pow(gradY,2) + pow(gradZ,2));
-
-    if (NormGrad >= Precision)
+    if (delta != 0.0)
     {
-        double NormX = gradX/NormGrad;
-        double NormY = gradY/NormGrad;
-        double NormZ = gradZ/NormGrad;
-        double gamma = pow(NormX, 4) + pow(NormY, 4) + pow(NormZ, 4);
-        double sigma = sigma0*(1.0 + delta * (1.5 - 2.5*(gamma)));
+        double gradX = df_dx(Phi,i,j,k);
+        double gradY = df_dy(Phi,i,j,k);
+        double gradZ = df_dz(Phi,i,j,k);
 
-        return sigma;
+        double NormGrad = sqrt(pow(gradX,2) + pow(gradY,2) + pow(gradZ,2));
+
+        if (NormGrad >= Precision)
+        {
+            double NormX = gradX/NormGrad;
+            double NormY = gradY/NormGrad;
+            double NormZ = gradZ/NormGrad;
+            double gamma = pow(NormX, 4) + pow(NormY, 4) + pow(NormZ, 4);
+            double sigma = sigma0*(1.0 + delta * (1.5 - 2.5*(gamma)));
+
+            return sigma;
+        }
+        else return sigma0;
     }
     else return sigma0;
 }
 
-void CalcTimeStep(double* Phi, double* PhiDot, double* Temp, double* TempDot)
+double CalcVariationDerivativePhi(double* Phi, double Temp, int i, int j, int k)
 {
-    // Calculate PhiDot and TempDot
+    int    locIndex   = Index(i,j,k);
+    double locPhi     = Phi[locIndex];
+    double locPhiDot  = 0.0;
+    // Calculate variation derivative of the DO-potential
+    if ((locPhi < 0.0) or (locPhi > 1.0))
+    {
+        locPhiDot  -= sigma0 * pow(M_PI/eta,2) * (locPhi - 0.5);
+    }
+    else if ((locPhi > 0) and (locPhi < 1))
+    {
+        // Calculate and apply the driving force
+        double qPhi = locPhi * (1.0 - locPhi);
+        locPhiDot  -= M_PI/(eta) * sqrt(qPhi) * dS * (Temp - Tm);
+        locPhiDot  += sigma(Phi,i,j,k) * pow(M_PI/eta,2) * (locPhi - 0.5);
+    }
+    
+    // Calculate Laplacian of the phase field
+    locPhiDot  += sigma(Phi,i,j,k)  * Laplace(Phi,i,j,k);
+    
+    return locPhiDot;
+}
+
+double mu_effecitve(double Phi, double PhiDot, double GradPhiNormal, double Ts)
+{
+    double v = PhiDot * GradPhiNormal;
+    double x = eta/M_PI * acos(2.0 * Phi - 1.0);
+    double A = (Ts - temperature_steady_state(x,v,Ts))/v;
+    return mu/(1-A); 
+}
+
+void CalcPhiDot(double* Phi, double* PhiDot, double* Temp)
+{
     #pragma omp parallel for schedule(auto) collapse(2)
     for (int i = BCELLS; i < Nx + BCELLS; i++)
     for (int j = BCELLS; j < Ny + BCELLS; j++)
     for (int k = BCELLS; k < Nz + BCELLS; k++)
     {
-        int    locIndex   = Index(i,j,k);
+        int    locIndex  = Index(i,j,k);
+        double dF_dPhi   = CalcVariationDerivativePhi(Phi,Temp[locIndex],i,j,k);
+        double locPhiDot = mu * dF_dPhi;  // The normal local Phi_Dot
 
-        double locPhi     = Phi[locIndex];
-        double locPhiDot  = 0.0;
-        double locTempDot = 0.0;
-
-        // Calculate variation derivative of the DO-potential
-        //if ((locPhi < 0.0) or (locPhi > 1.0))
+        //if ((locPhi > 0) and (locPhi < 1))
         //{
-        //    locPhiDot  -= sigma0 * pow(M_PI/eta,2) * (locPhi - 0.5);
+        //    double locGradPhiNormal = df_dx(Phi,i,j,k);
+        //    double locPhi           = Phi [locIndex];
+
+        //    // TODO calculate local solid Temperature
+        //    double locTs = Tm;
+
+        //    const double epsilonF     = 1.0e-10;
+        //    const double epsilonP     = 1.0e-10;
+        //    const int    MaxIteration = 100000;
+        //    int  iteration = 0;
+        //    bool iterate   = true;
+
+        //    double locPhiDotA = -1.0/dt;
+        //    double locPhiDotB =  1.0/dt;
+
+        //    double fa = mu_effecitve(locPhi, locPhiDotA, locGradPhiNormal, locTs) * dF_dPhi - locPhiDotA;
+        //    double fb = mu_effecitve(locPhi, locPhiDotB, locGradPhiNormal, locTs) * dF_dPhi - locPhiDotB;
+        //    double fc = mu_effecitve(locPhi, locPhiDot , locGradPhiNormal, locTs) * dF_dPhi - locPhiDot;
+
+        //    while ((fabs(fc) > epsilonF) or (fabs(locPhiDotA-locPhiDotB) > epsilonP));
+        //    {
+        //        if      (((fa > 0) and (fc > 0)) or((fa < 0) and (fc < 0))) locPhiDotA = locPhiDot;
+        //        else if (((fb > 0) and (fc > 0)) or((fb < 0) and (fc < 0))) locPhiDotB = locPhiDot;
+        //        else break;
+
+        //        //locPhiDot = (locPhiDotA * fb - locPhiDotB * fa)/(fb - fa);
+        //        locPhiDot = 0.5 * (locPhiDotB + locPhiDotA);
+        //        fc = mu_effecitve(locPhi, locPhiDot , locGradPhiNormal, locTs) * dF_dPhi - locPhiDot;
+
+        //        iteration ++;
+        //        if (iteration > MaxIteration) break;
+        //    }
+        //    while (iterate);
         //}
-        //else if ((locPhi > 0) and (locPhi < 1))
-        if ((locPhi > 0) and (locPhi < 1))
-        {
-            // Calculate and apply the driving force
-            double qPhi = locPhi * (1.0 - locPhi);
-            locPhiDot  -= M_PI/(eta) * sqrt(qPhi) * dS * (Temp[locIndex] - Tm);
-            locPhiDot  += sigma(Phi,i,j,k) * pow(M_PI/eta,2) * (locPhi - 0.5);
-        }
 
-        // Calculate Laplacian of the phase field
-        locPhiDot  += sigma(Phi,i,j,k)  * Laplace(Phi,i,j,k);
-        locPhiDot  *= mu;
-
+        // Limit phase field
         double newPhi = Phi[locIndex] + dt * locPhiDot;
         if (newPhi > 1.0) locPhiDot -= (newPhi-1.0)/dt;
         if (newPhi < 0.0) locPhiDot -=  newPhi/dt;
 
+        // Calculate and write time derivatives into the device memory
+        PhiDot [locIndex] += locPhiDot;
+    }
+}
+
+void CalcTempDot(double* Phi, double* PhiDot, double* Temp, double* TempDot)
+{
+    #pragma omp parallel for schedule(auto) collapse(2)
+    for (int i = BCELLS; i < Nx + BCELLS; i++)
+    for (int j = BCELLS; j < Ny + BCELLS; j++)
+    for (int k = BCELLS; k < Nz + BCELLS; k++)
+    {
         // Calculate time derivative of the temperature
-        locTempDot += alpha(locPhi) * Laplace(Temp,i,j,k) + kappa * locPhiDot;
+        int    locIndex   = Index(i,j,k);
+        double locTempDot = 0.0;
+        locTempDot += alpha(Phi[locIndex]) * Laplace(Temp,i,j,k);
+        locTempDot += kappa * PhiDot[locIndex];
 
         // Write time derivatives into the device memory
-        PhiDot [locIndex] += locPhiDot;
         TempDot[locIndex] += locTempDot;
     }
 }
 
-void ApplyTimeStep(double* Phi, double* PhiDot, double* Temp, double* TempDot)
+
+void ApplyTimeStep(double* field, double* fieldDot)
 {
     #pragma omp parallel for schedule(auto) collapse(2)
     for (int i = BCELLS; i < Nx + BCELLS; i++)
@@ -242,12 +325,9 @@ void ApplyTimeStep(double* Phi, double* PhiDot, double* Temp, double* TempDot)
     for (int k = BCELLS; k < Nz + BCELLS; k++)
     {
         int locIndex = Index(i,j,k);
-
         // Update fields
-        Phi    [locIndex] += dt * PhiDot [locIndex];
-        PhiDot [locIndex]  = 0.0;
-        Temp   [locIndex] += dt * TempDot[locIndex];
-        TempDot[locIndex]  = 0.0;
+        field    [locIndex] += dt * fieldDot [locIndex];
+        fieldDot [locIndex]  = 0.0;
    }
 }
 
@@ -257,6 +337,7 @@ void SetBoundariesX(double* field)
     for (int j = 0; j < My;     j++)
     for (int k = 0; k < Mz;     k++)
     {
+        double df0 = field[Index(1,j,k)];
         double df1 = 0.0;
         double df2 = 0.0;
         double df3 = 0.0;
@@ -279,12 +360,14 @@ void SetBoundariesX(double* field)
         df3 -= 3 * field[Index(3,j,k)];
         df3 +=     field[Index(4,j,k)];
 
-        field[Index(0,j,k)] = field[Index(1,j,k)] - df1 + 0.5*df2 - 1./6.*df3;
+        // Make Taylor expansion
+        field[Index(0,j,k)] = df0 - df1 + 0.5*df2 - 1./6.*df3;
     }
     #pragma omp parallel for schedule(auto) collapse(1)
     for (int j = 0; j < My;     j++)
     for (int k = 0; k < Mz;     k++)
     {
+        double df0 = field[Index(Mx-2,j,k)];
         double df1 = 0.0;
         double df2 = 0.0;
         double df3 = 0.0;
@@ -307,7 +390,8 @@ void SetBoundariesX(double* field)
         df3 -= 3 * field[Index(Mx-3,j,k)];
         df3 +=     field[Index(Mx-2,j,k)];
 
-        field[Index(Mx-1,j,k)] = field[Index(Mx-2,j,k)] + df1 + 0.5*df2 + 1./6.*df3;
+        // Make Taylor expansion
+        field[Index(Mx-1,j,k)] = df0 + df1 + 0.5*df2 + 1./6.*df3;
     }
 
 }
@@ -447,23 +531,27 @@ int main(int argc, char* argv[])
             }
 
             // Stop simulation if the end is reached
-            if (InterfacePosOut >= 80) break; 
+            if (InterfacePosOut >= 85) break; 
         }
 
         // Set boundary conditions
         SetBoundaries(Phi);
         SetBoundaries(Temp);
 
-        // Calculate and apply time step
-        CalcTimeStep(Phi,  PhiDot, Temp, TempDot);
-        ApplyTimeStep(Phi, PhiDot, Temp, TempDot);
+        // Calculate time-step
+        CalcPhiDot( Phi, PhiDot, Temp);
+        CalcTempDot(Phi, PhiDot, Temp, TempDot);
+
+        // Apply time-step
+        ApplyTimeStep(Phi, PhiDot);
+        ApplyTimeStep(Temp, TempDot);
     }
 
     // Stop run time measurement
     gettimeofday(&end, NULL);
     double simTime = ((end.tv_sec  - start.tv_sec) * 1000000u
             + end.tv_usec - start.tv_usec) / 1.e6;
-    cout << "Calculation time for " << Nt << " time step: " << simTime << " s" << endl;
+    cout << "Calculation time: " << simTime << " s" << endl;
 
     // Cleanup
     free(Phi);
