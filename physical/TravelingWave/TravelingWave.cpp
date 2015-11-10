@@ -238,7 +238,24 @@ double mu_effecitve(double Phi, double PhiDot, double GradPhiNormal, double Ts)
     //double x = eta/M_PI * acos(2.0 * Phi - 1.0);
     //double A = (Ts - temperature_steady_state(x,v,Ts))/v;
     //return mu/(1-A); 
-    return mu;
+    return (1.0 - 1.0e-1)  * mu;
+}
+
+double dmu_effecitve_dPhiDot(double Phi, double PhiDot, double GradPhiNormal, double Ts)
+{
+    return 0.0;
+}
+
+double PhiDotEQ(double Phi, double PhiDot, double GradPhiNormal, double Ts,
+        double dF_dPhi)
+{
+    return mu_effecitve(Phi, PhiDot, GradPhiNormal, Ts) * dF_dPhi - PhiDot;
+}
+
+double dPhiDotEQ_dPhiDot(double Phi, double PhiDot, double GradPhiNormal,
+        double Ts, double dF_dPhi)
+{
+    return dmu_effecitve_dPhiDot(Phi, PhiDot, GradPhiNormal, Ts) * dF_dPhi - 1.0;
 }
 
 void CalcPhiDot(double* Phi, double* PhiDot, double* Temp)
@@ -255,39 +272,29 @@ void CalcPhiDot(double* Phi, double* PhiDot, double* Temp)
 
         if ((locPhi > 0) and (locPhi < 1))
         {
+            // Define and set parameter for the iterative algorithm
+            const double epsilonF     = 1.0e-10;
+            const int    MaxIteration = 100000;
+            int  iteration = 0;
+ 
             double locGradPhiNormal = df_dx(Phi,i,j,k);
             double locPhi           = Phi [locIndex];
 
             // TODO calculate local solid Temperature
             double locTs = Tm;
 
-            double locPhiDotA = -1.0/dt;
-            double locPhiDotB =  1.0/dt;
-
-            double fa = mu_effecitve(locPhi, locPhiDotA, locGradPhiNormal, locTs) * dF_dPhi - locPhiDotA;
-            double fb = mu_effecitve(locPhi, locPhiDotB, locGradPhiNormal, locTs) * dF_dPhi - locPhiDotB;
-            double fc = mu_effecitve(locPhi, locPhiDot , locGradPhiNormal, locTs) * dF_dPhi - locPhiDot;
-
-            // Start iterative algorithm
-            const double epsilonF     = 1.0e-10;
-            const double epsilonP     = 1.0e-10;
-            const int    MaxIteration = 100000;
-            int  iteration = 0;
-            bool iterate   = (fabs(fc) > epsilonF);
+            // If locPhiDot deviates from the solution start iterative solver
+            // Start iterative solver if no error occurred (Newton's method)
+            bool iterate = true;
             while (iterate)
             {
-                  cout << fabs(fc) << endl;
-            //    if      (((fa > 0) and (fc > 0)) or((fa < 0) and (fc < 0))) locPhiDotA = locPhiDot;
-            //    else if (((fb > 0) and (fc > 0)) or((fb < 0) and (fc < 0))) locPhiDotB = locPhiDot;
-            //    else break;
+                double  fc =  PhiDotEQ        (locPhi, locPhiDot , locGradPhiNormal, locTs, dF_dPhi);
+                double dfc = dPhiDotEQ_dPhiDot(locPhi, locPhiDot , locGradPhiNormal, locTs, dF_dPhi);
+                locPhiDot -= fc/dfc;
 
-            //    //locPhiDot = (locPhiDotA * fb - locPhiDotB * fa)/(fb - fa);
-            //    locPhiDot = 0.5 * (locPhiDotB + locPhiDotA);
-            //    fc = mu_effecitve(locPhi, locPhiDot , locGradPhiNormal, locTs) * dF_dPhi - locPhiDot;
-
-                iteration ++;
-                if (iteration > MaxIteration) break;
-                iterate = (fabs(fc) > epsilonF) xor (fabs(locPhiDotA-locPhiDotB) > epsilonP);
+                iteration++;
+                if (iteration > MaxIteration) iterate = false;
+                iterate = (fabs(fc) > epsilonF);
             }
         }
 
