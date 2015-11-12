@@ -39,32 +39,30 @@ const int My = Ny + 2 * BCELLS;  // Memory size in y-direction
 const int Mz = Nz + 2 * BCELLS;  // Memory size in z-direction
 
 // Define number of time steps
-const int Nt     = 16000; // Number of time steps
-const int tOut   = 8000;   // Output distance in time steps
-bool WriteToDisk = true;
+const int Nt     = 5000; // Number of time steps
+const int tOut   = 1000;  // Output distance in time steps
+bool WriteToDisk = false;
 
 // Define grid spacing
-__constant__ double dt = 1.0e-4;  // Size of time step [s]
-__constant__ double dx = 3.0e-2;  // Grid spacing in x-direction [m]
-__constant__ double dy = 3.0e-2;  // Grid spacing in y-direction [m]
-__constant__ double dz = 3.0e-2;  // Grid spacing in z-direction [m]
+__constant__ float dt = 1.0e-4;  // Size of time step [s]
+__constant__ float dx = 3.0e-2;  // Grid spacing in x-direction [m]
+__constant__ float dy = 3.0e-2;  // Grid spacing in y-direction [m]
+__constant__ float dz = 3.0e-2;  // Grid spacing in z-direction [m]
 
 // Kobayashi's parameters (not exactly his..)
-__constant__ double Gamma     = 10.0;    // Coefficient of driving force
-__constant__ double Precision = 1.e-9;   // Calculation precision
-__constant__ double Radius    = 0.1;     // Initial radius of spherical grain
-__constant__ double T0        = 0.0;     // Initial temperature
-__constant__ double Tm        = 1.0;     // Equilibrium temperature  (no-dimension)
-__constant__ double alpha     = 0.8;     // Coefficient of driving force
-__constant__ double ampl      = 0.01;    // Amplitude of noise
-__constant__ double delta     = 0.20;    // Anisotropy in (0,1)
-__constant__ double epsilon   = 0.010;   // Gradient energy coefficient
-__constant__ double kappa     = 1.7;     // Referrers to latent heat (no-dimension)
-__constant__ double tau       = 3.0e-4;  // Inverse of interface mobility [s]
+__constant__ float Gamma     = 10.0;    // Coefficient of driving force
+__constant__ float Precision = 1.e-9;   // Calculation precision
+__constant__ float Radius    = 0.1;     // Initial radius of spherical grain
+__constant__ float T0        = 0.0;     // Initial temperature
+__constant__ float Tm        = 1.0;     // Equilibrium temperature  (no-dimension)
+__constant__ float alpha     = 0.8;     // Coefficient of driving force
+__constant__ float ampl      = 0.01;    // Amplitude of noise
+__constant__ float delta     = 0.20;    // Anisotropy in (0,1)
+__constant__ float epsilon   = 0.010;   // Gradient energy coefficient
+__constant__ float kappa     = 1.7;     // Referrers to latent heat (no-dimension)
+__constant__ float tau       = 3.0e-4;  // Inverse of interface mobility [s]
 
-// Misc parameters
-const int seed = 123; // Random number seed
-__constant__ double LaplacianStencil27[3][3][3] = {{{1.0/30.0,   1.0/10.0, 1.0/30.0},
+__constant__ float LaplacianStencil27[3][3][3] = {{{1.0/30.0,   1.0/10.0, 1.0/30.0},
                                              {1.0/10.0,   7.0/15.0, 1.0/10.0},
                                              {1.0/30.0,   1.0/10.0, 1.0/30.0}},
 
@@ -75,8 +73,9 @@ __constant__ double LaplacianStencil27[3][3][3] = {{{1.0/30.0,   1.0/10.0, 1.0/3
                                             {{1.0/30.0,   1.0/10.0, 1.0/30.0},
                                              {1.0/10.0,   7.0/15.0, 1.0/10.0},
                                              {1.0/30.0,   1.0/10.0, 1.0/30.0}}};///< 27 point Laplacian stencil by Spotz and Carey (1995)
-
-void WriteToFile(const int tStep, double* field, string name);
+// Misc parameters
+const int seed = 123; // Random number seed
+void WriteToFile(const int tStep, float* field, string name);
 __global__ void InitializeRandomNumbers( curandState *state);
 
 __host__ __device__
@@ -87,13 +86,13 @@ inline int Index(int i, int j, int k)
 }
 
 __global__
-void InitializeSupercooledSphere(double* Phi, double* PhiDot, double* Temp,
-        double* TempDot)
+void InitializeSupercooledSphere(float* Phi, float* PhiDot, float* Temp,
+        float* TempDot)
 {
     // Initialization
-    const double x0 = BCELLS * dx;
-    const double y0 = BCELLS * dy;
-    const double z0 = BCELLS * dz;
+    const float x0 = BCELLS * dx;
+    const float y0 = BCELLS * dy;
+    const float z0 = BCELLS * dz;
 
     // Define indices of the device memory
     int i = blockIdx.x * blockDim.x + threadIdx.x + BCELLS;
@@ -102,7 +101,7 @@ void InitializeSupercooledSphere(double* Phi, double* PhiDot, double* Temp,
 
         int locIndex = Index(i,j,k);
         // Initialize the phase Field
-        double r = sqrt(pow(i*dx-x0,2) + pow(j*dy-y0,2) + pow(k*dz-z0,2));
+        float r = sqrt(pow(i*dx-x0,2) + pow(j*dy-y0,2) + pow(k*dz-z0,2));
         if (r < Radius)
         {
             Phi [locIndex] = 1.0;
@@ -119,10 +118,10 @@ void InitializeSupercooledSphere(double* Phi, double* PhiDot, double* Temp,
 
 // Laplace operator
 __device__
-double Laplace(double* field, int i, int j, int k)
+float Laplace(float* field, int i, int j, int k)
 {
 
-    double Laplacian = 0.0;
+    float Laplacian = 0.0;
     for (int ii = -1; ii <= +1; ++ii)
     for (int jj = -1; jj <= +1; ++jj)
     for (int kk = -1; kk <= +1; ++kk)
@@ -132,7 +131,7 @@ double Laplace(double* field, int i, int j, int k)
 }
 
 __global__
-void CalcTimeStep(double* Phi, double* PhiDot, double* Temp, double* TempDot, curandState * State)
+void CalcTimeStep(float* Phi, float* PhiDot, float* Temp, float* TempDot, curandState * State)
 {
     // Calculate PhiDot and TempDot
     int i = blockIdx.x * blockDim.x + threadIdx.x + BCELLS;
@@ -140,36 +139,36 @@ void CalcTimeStep(double* Phi, double* PhiDot, double* Temp, double* TempDot, cu
     int k = blockIdx.z * blockDim.z + threadIdx.z + BCELLS;
 
         int locIndex     = Index(i,j,k);
-        double locPhiDot = 0.0;
-        double locPhi    = Phi[locIndex];
+        float locPhiDot = 0.0;
+        float locPhi    = Phi[locIndex];
         // Calculate driving force m
         if ((locPhi > Precision) or  (locPhi < 1.0 - Precision))
         {
 
-            double Q1 = 1.2*M_PI/4.0;
-            double Q2 = 0.0;
-            double Q3 = M_PI/4.0;
+            float Q1 = 1.2*M_PI/4.0;
+            float Q2 = 0.0;
+            float Q3 = M_PI/4.0;
 
-            double c1 = cos(Q1);
-            double c2 = cos(Q2);
-            double c3 = cos(Q3);
+            float c1 = cos(Q1);
+            float c2 = cos(Q2);
+            float c3 = cos(Q3);
 
-            double s1 = sin(Q1);
-            double s2 = sin(Q2);
-            double s3 = sin(Q3);
+            float s1 = sin(Q1);
+            float s2 = sin(Q2);
+            float s3 = sin(Q3);
 
             //This matrix follows XYZ notations (http://en.wikipedia.org/wiki/Euler_angles)
-            double Rot[3][3] = {{           c2*c3,           - c2*s3,      s2},
+            float Rot[3][3] = {{           c2*c3,           - c2*s3,      s2},
                                 {c1*s3 + c3*s1*s2,  c1*c3 - s1*s2*s3,  -c2*s1},
                                 {s1*s3 - c1*c3*s2,  c3*s1 + c1*s2*s3,   c1*c2}};
 
             // Calculate gradient of Phi
-            double gradX = (Phi[Index(i+1,j,k)] - Phi[Index(i-1,j,k)])/(2*dx);
-            double gradY = (Phi[Index(i,j+1,k)] - Phi[Index(i,j-1,k)])/(2*dy);
-            double gradZ = (Phi[Index(i,j,k+1)] - Phi[Index(i,j,k-1)])/(2*dz);
+            float gradX = (Phi[Index(i+1,j,k)] - Phi[Index(i-1,j,k)])/(2*dx);
+            float gradY = (Phi[Index(i,j+1,k)] - Phi[Index(i,j-1,k)])/(2*dy);
+            float gradZ = (Phi[Index(i,j,k+1)] - Phi[Index(i,j,k-1)])/(2*dz);
 
-            double grad[3] = {gradX, gradY, gradZ};
-            double gradR[3] = {0.0, 0.0, 0.0};
+            float grad[3] = {gradX, gradY, gradZ};
+            float gradR[3] = {0.0, 0.0, 0.0};
 
             for(int ii = 0; ii < 3; ++ii)
             for(int jj = 0; jj < 3; ++jj)
@@ -181,19 +180,19 @@ void CalcTimeStep(double* Phi, double* PhiDot, double* Temp, double* TempDot, cu
             gradY = gradR[1];
             gradZ = gradR[2];
 
-            double div   = pow(pow(gradX,2) + pow(gradY,2) + pow(gradZ,2),2);
-            double theta = 0.0;
+            float div   = pow(pow(gradX,2) + pow(gradY,2) + pow(gradZ,2),2);
+            float theta = 0.0;
             if ( div > 1.e-12)
                 theta = (pow(gradX,4) + pow(gradY,4)+ pow(gradZ,4))/div;
             else
                 theta = 0.0;
-            double sigma = (1.-4.*delta*(1.-theta));
+            float sigma = (1.-4.*delta*(1.-theta));
 
             // Calculate noise
-            double noise = 0.0;//ampl * curand_uniform(&State[locIndex]);
+            float noise = 0.0;//ampl * curand_uniform(&State[locIndex]);
 
             // Calculate driving force am
-            double m = (alpha/M_PI) * atan(Gamma*(Tm - Temp[locIndex])*sigma);
+            float m = (alpha/M_PI) * atan(Gamma*(Tm - Temp[locIndex])*sigma);
 
             // Add driving force to PhiDot
             locPhiDot += locPhi*(1.0 - locPhi)*(locPhi - 0.5 + m + noise);
@@ -208,7 +207,7 @@ void CalcTimeStep(double* Phi, double* PhiDot, double* Temp, double* TempDot, cu
 }
 
 __global__
-void ApplyTimeStep(double* field, double* fieldDot)
+void ApplyTimeStep(float* field, float* fieldDot)
 {
     // Define global indices of the device memory
     int i = blockIdx.x * blockDim.x + threadIdx.x + BCELLS;
@@ -223,55 +222,49 @@ void ApplyTimeStep(double* field, double* fieldDot)
 }
 
 __global__
-void SetBoundariesYZ(double* field)
+void SetBoundariesYZ(float* field)
 {
     // Define global indices of the device memory
     int j = blockIdx.x * blockDim.x + threadIdx.x;
-    //int b = blockIdx.y * blockDim.y + threadIdx.y;
+    int b = blockIdx.y * blockDim.y + threadIdx.y;
     int k = blockIdx.z * blockDim.z + threadIdx.z;
 
         // Apply mirror boundary conditions
-        //field[Index(b     ,j,k)] = field[Index( 2*BCELLS-1-b,j,k)];
-        //field[Index(Mx-1-b,j,k)] = field[Index(Mx-2*BCELLS+b,j,k)];
-        field[Index(0   ,j,k)] = field[Index(1   ,j,k)];
-        field[Index(Mx-1,j,k)] = field[Index(Mx-2,j,k)];
+        field[Index(b     ,j,k)] = field[Index( 2*BCELLS-1-b,j,k)];
+        field[Index(Mx-1-b,j,k)] = field[Index(Mx-2*BCELLS+b,j,k)];
 
 }
 
 __global__
-void SetBoundariesXZ(double* field)
+void SetBoundariesXZ(float* field)
 {
     // Define global indices of the device memory
     int i = blockIdx.x * blockDim.x + threadIdx.x;
-    //int b = blockIdx.y * blockDim.y + threadIdx.y;
+    int b = blockIdx.y * blockDim.y + threadIdx.y;
     int k = blockIdx.z * blockDim.z + threadIdx.z;
 
         // Apply mirror boundary conditions
-        //field[Index(i,b     ,k)] = field[Index(i, 2*BCELLS-1-b,k)];
-        //field[Index(i,My-1-b,k)] = field[Index(i,My-2*BCELLS+b,k)];
-        field[Index(i,0   ,k)] = field[Index(i,   1,k)];
-        field[Index(i,My-1,k)] = field[Index(i,My-2,k)];
+        field[Index(i,b     ,k)] = field[Index(i, 2*BCELLS-1-b,k)];
+        field[Index(i,My-1-b,k)] = field[Index(i,My-2*BCELLS+b,k)];
 
 }
 
 __global__
-void SetBoundariesXY(double* field)
+void SetBoundariesXY(float* field)
 {
     // Define global indices of the device memory
     int i = blockIdx.x * blockDim.x + threadIdx.x;
-    //int b = blockIdx.y * blockDim.y + threadIdx.y;
+    int b = blockIdx.y * blockDim.y + threadIdx.y;
     int j = blockIdx.z * blockDim.z + threadIdx.z;
 
         // Apply mirror boundary conditions
-        //field[Index(i,j,b     )] = field[Index(i,j, 2*BCELLS-1-b)];
-        //field[Index(i,j,Mz-1-b)] = field[Index(i,j,Mz-2*BCELLS+b)];
-        field[Index(i,j,0   )] = field[Index(i,j,   1)];
-        field[Index(i,j,Mz-1)] = field[Index(i,j,Mz-2)];
+        field[Index(i,j,b     )] = field[Index(i,j, 2*BCELLS-1-b)];
+        field[Index(i,j,Mz-1-b)] = field[Index(i,j,Mz-2*BCELLS+b)];
 
 }
 
 __host__
-void SetBoundaries(double* field)
+void SetBoundaries(float* field)
 {
 
     // Define grid/block structure
@@ -293,17 +286,17 @@ int main()
 {
     // Calculate memory size
     int numElements = Mx * My * Mz;
-    size_t size = numElements * sizeof(double);
+    size_t size = numElements * sizeof(float);
 
     // Define and allocate host memory
-    double* Phi     = (double *)malloc(size);  memset(Phi,     0, size);
-    double* Temp    = (double *)malloc(size);  memset(Temp,    0, size);
+    float* Phi     = (float *)malloc(size);  memset(Phi,     0, size);
+    float* Temp    = (float *)malloc(size);  memset(Temp,    0, size);
 
     // Allocate Device Memory
-    double* devPhi;
-    double* devPhiDot;
-    double* devTemp;
-    double* devTempDot;
+    float* devPhi;
+    float* devPhiDot;
+    float* devTemp;
+    float* devTempDot;
     curandState* devState;  // Used for random number generation
 
     // Allocate device memory and initialize it
@@ -362,13 +355,14 @@ int main()
         // Calculate and apply time step
         CalcTimeStep <<< dimGrid, dimBlock >>>(devPhi, devPhiDot, devTemp, devTempDot, devState);
 
+        // Apply time step
         ApplyTimeStep<<< dimGrid , dimBlock >>>(devPhi  , devPhiDot);
         ApplyTimeStep<<< dimGrid , dimBlock >>>(devTemp , devTempDot);
     }
 
     // Stop run time measurement
     gettimeofday(&end, NULL);
-    double simTime = ((end.tv_sec  - start.tv_sec) * 1000000u
+    float simTime = ((end.tv_sec  - start.tv_sec) * 1000000u
             + end.tv_usec - start.tv_usec) / 1.e6;
     cout << "Calculation time for " << Nt << " time step: " << simTime << " s" << endl;
 
@@ -399,7 +393,7 @@ void InitializeRandomNumbers( curandState *state)
     curand_init ( seed, locIndex, 0, &state[locIndex] );
 }
 
-void WriteToFile(const int tStep, double* field, string name)
+void WriteToFile(const int tStep, float* field, string name)
 {
     {
     stringstream filename;
@@ -412,18 +406,18 @@ void WriteToFile(const int tStep, double* field, string name)
     vtk_file << "ASCII\n";
     vtk_file << "DATASET RECTILINEAR_GRID\n";
     vtk_file << "DIMENSIONS " << Nx << " " << Ny << " " << Nz << endl;
-    vtk_file << "X_COORDINATES " << Nx << " double\n";
+    vtk_file << "X_COORDINATES " << Nx << " float\n";
     for (int i = 0; i < Nx; i++) vtk_file << i << " ";
     vtk_file << endl;
-    vtk_file << "Y_COORDINATES " << Ny << " double\n";
+    vtk_file << "Y_COORDINATES " << Ny << " float\n";
     for (int j = 0; j < Ny; j++) vtk_file << j << " ";
     vtk_file << endl;
-    vtk_file << "Z_COORDINATES " << Nz << " double\n";
+    vtk_file << "Z_COORDINATES " << Nz << " float\n";
     for (int k = 0; k < Nz; k++) vtk_file << k << " ";
     vtk_file << endl;
     vtk_file << "POINT_DATA " << Nx*Ny*Nz << endl;
 
-    vtk_file << "SCALARS " << name << " double 1\n";
+    vtk_file << "SCALARS " << name << " float 1\n";
     vtk_file << "LOOKUP_TABLE default\n";
     for (int k = BCELLS; k < Nz + BCELLS; ++k)
     for (int j = BCELLS; j < Ny + BCELLS; ++j)
