@@ -41,7 +41,7 @@ const int Mz = Nz + 2 * BCELLS;  // Memory size in z-direction
 // Define number of time steps
 const int Nt     = 5000; // Number of time steps
 const int tOut   = 1000;  // Output distance in time steps
-bool WriteToDisk = false;
+bool WriteToDisk = true;
 
 // Define grid spacing
 __constant__ float dt = 1.0e-4;  // Size of time step [s]
