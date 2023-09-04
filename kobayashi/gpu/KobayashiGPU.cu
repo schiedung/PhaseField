@@ -13,7 +13,8 @@
 #include <iostream>
 #include <sstream>
 #include <string.h>
-#include <sys/time.h>
+#include <numbers>
+//#include <sys/time.h>
 
 using namespace std;
 
@@ -39,8 +40,9 @@ const int My = Ny + 2 * BCELLS;  // Memory size in y-direction
 const int Mz = Nz + 2 * BCELLS;  // Memory size in z-direction
 
 // Define number of time steps
-const int Nt     = 5000; // Number of time steps
-const int tOut   = 1000;  // Output distance in time steps
+const int Nt      = 5000; // Number of time steps
+const int tOut    = 1000;  // Output distance in time steps
+const int tScreen = 10;    // Output distance to screen
 bool WriteToDisk = true;
 
 // Define grid spacing
@@ -76,7 +78,7 @@ __constant__ float LaplacianStencil27[3][3][3] = {{{1.0/30.0,   1.0/10.0, 1.0/30
 // Misc parameters
 const int seed = 123; // Random number seed
 void WriteToFile(const int tStep, float* field, string name);
-__global__ void InitializeRandomNumbers( curandState *state);
+//__global__ void InitializeRandomNumbers( curandState *state);
 
 __host__ __device__
 inline int Index(int i, int j, int k)
@@ -131,7 +133,7 @@ float Laplace(float* field, int i, int j, int k)
 }
 
 __global__
-void CalcTimeStep(float* Phi, float* PhiDot, float* Temp, float* TempDot, curandState * State)
+void CalcTimeStep(float* Phi, float* PhiDot, float* Temp, float* TempDot)//, curandState * State)
 {
     // Calculate PhiDot and TempDot
     int i = blockIdx.x * blockDim.x + threadIdx.x + BCELLS;
@@ -142,12 +144,12 @@ void CalcTimeStep(float* Phi, float* PhiDot, float* Temp, float* TempDot, curand
         float locPhiDot = 0.0;
         float locPhi    = Phi[locIndex];
         // Calculate driving force m
-        if ((locPhi > Precision) or  (locPhi < 1.0 - Precision))
+        if ((locPhi > Precision) ||  (locPhi < 1.0 - Precision))
         {
 
-            float Q1 = 1.2*M_PI/4.0;
+            float Q1 = 1.2*std::numbers::pi/4.0;
             float Q2 = 0.0;
-            float Q3 = M_PI/4.0;
+            float Q3 = std::numbers::pi/4.0;
 
             float c1 = cos(Q1);
             float c2 = cos(Q2);
@@ -192,7 +194,7 @@ void CalcTimeStep(float* Phi, float* PhiDot, float* Temp, float* TempDot, curand
             float noise = 0.0;//ampl * curand_uniform(&State[locIndex]);
 
             // Calculate driving force am
-            float m = (alpha/M_PI) * atan(Gamma*(Tm - Temp[locIndex])*sigma);
+            float m = (alpha/std::numbers::pi) * atan(Gamma*(Tm - Temp[locIndex])*sigma);
 
             // Add driving force to PhiDot
             locPhiDot += locPhi*(1.0 - locPhi)*(locPhi - 0.5 + m + noise);
@@ -297,7 +299,7 @@ int main()
     float* devPhiDot;
     float* devTemp;
     float* devTempDot;
-    curandState* devState;  // Used for random number generation
+    //curandState* devState;  // Used for random number generation
 
     // Allocate device memory and initialize it
     cudaMalloc((void**)&devPhi,     size);  cudaMemset(devPhi,     0, size);
@@ -324,25 +326,25 @@ int main()
     InitializeSupercooledSphere<<< dimGrid, dimBlock >>>(devPhi, devPhiDot, devTemp, devPhiDot);
 
     // Initialize Random seed
-    cout << "Initialize Random Seed.." << endl;
+    //cout << "Initialize Random Seed.." << endl;
     //InitializeRandomNumbers<<< dimGrid, dimBlock >>>(devState);
     cudaDeviceSynchronize();
 
     // Start run time measurement
-    struct timeval start, end;
-    gettimeofday(&start, NULL);
+    //struct timeval start, end;
+    //gettimeofday(&start, NULL);
 
     // Start time loop
     for (int tStep = 0; tStep <= Nt; tStep++)
     {
         // Make Output if necessary
-        if(tStep%tOut == 0)
+        if(tStep%tScreen == 0)
         {
-            cudaMemcpy(Phi,  devPhi,  size, cudaMemcpyDeviceToHost);
-            cudaMemcpy(Temp, devTemp, size, cudaMemcpyDeviceToHost);
             cout << "Time step: " << tStep << "/" << Nt << endl;
-            if (WriteToDisk)
+            if (WriteToDisk%tOut == 0)
             {
+                cudaMemcpy(Phi,  devPhi,  size, cudaMemcpyDeviceToHost);
+                cudaMemcpy(Temp, devTemp, size, cudaMemcpyDeviceToHost);
                 WriteToFile(tStep, Phi,  "PhaseField");
                 WriteToFile(tStep, Temp, "Temperature");
             }
@@ -353,7 +355,7 @@ int main()
         SetBoundaries(devTemp);
 
         // Calculate and apply time step
-        CalcTimeStep <<< dimGrid, dimBlock >>>(devPhi, devPhiDot, devTemp, devTempDot, devState);
+        CalcTimeStep <<< dimGrid, dimBlock >>>(devPhi, devPhiDot, devTemp, devTempDot);//, devState);
 
         // Apply time step
         ApplyTimeStep<<< dimGrid , dimBlock >>>(devPhi  , devPhiDot);
@@ -361,10 +363,10 @@ int main()
     }
 
     // Stop run time measurement
-    gettimeofday(&end, NULL);
-    float simTime = ((end.tv_sec  - start.tv_sec) * 1000000u
-            + end.tv_usec - start.tv_usec) / 1.e6;
-    cout << "Calculation time for " << Nt << " time step: " << simTime << " s" << endl;
+    //gettimeofday(&end, NULL);
+    //float simTime = ((end.tv_sec  - start.tv_sec) * 1000000u
+    //        + end.tv_usec - start.tv_usec) / 1.e6;
+    //cout << "Calculation time for " << Nt << " time step: " << simTime << " s" << endl;
 
     // Cleanup
     free(Phi);
