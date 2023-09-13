@@ -13,8 +13,10 @@
 #include <iostream>
 #include <sstream>
 #include <string.h>
-#include <numbers>
+//#include <numbers>
 //#include <sys/time.h>
+
+constexpr double pi = 3.14159265359;
 
 using namespace std;
 
@@ -80,6 +82,18 @@ const int seed = 123; // Random number seed
 void WriteToFile(const int tStep, float* field, string name);
 //__global__ void InitializeRandomNumbers( curandState *state);
 
+__device__
+int index_i() { return blockIdx.x * blockDim.x + threadIdx.x + BCELLS; }
+
+__device__
+int index_j() { return blockIdx.y * blockDim.y + threadIdx.y + BCELLS; }
+
+__device__
+int index_k() { return blockIdx.z * blockDim.z + threadIdx.z + BCELLS; }
+
+__device__
+int index() { return (index_k() * My + index_j()) * Mx + index_i(); }
+
 __host__ __device__
 inline int Index(int i, int j, int k)
 {
@@ -95,34 +109,28 @@ void InitializeSupercooledSphere(float* Phi, float* PhiDot, float* Temp,
     const float x0 = BCELLS * dx;
     const float y0 = BCELLS * dy;
     const float z0 = BCELLS * dz;
+    const int locIndex = index();
 
-    // Define indices of the device memory
-    int i = blockIdx.x * blockDim.x + threadIdx.x + BCELLS;
-    int j = blockIdx.y * blockDim.y + threadIdx.y + BCELLS;
-    int k = blockIdx.z * blockDim.z + threadIdx.z + BCELLS;
-
-        int locIndex = Index(i,j,k);
-        // Initialize the phase Field
-        float r = sqrt(pow(i*dx-x0,2) + pow(j*dy-y0,2) + pow(k*dz-z0,2));
-        if (r < Radius)
-        {
-            Phi [locIndex] = 1.0;
-            Temp[locIndex] = Tm;
-        }
-        else
-        {
-            Phi [locIndex] = 0.0;
-            Temp[locIndex] = T0;
-        }
-        PhiDot [locIndex] = 0.0;
-        TempDot[locIndex] = 0.0;
+    // Initialize the phase Field
+    float r = sqrt(pow(index_i()*dx-x0,2) + pow(index_j()*dy-y0,2) + pow(index_k()*dz-z0,2));
+    if (r < Radius)
+    {
+        Phi [locIndex] = 1.0;
+        Temp[locIndex] = Tm;
+    }
+    else
+    {
+        Phi [locIndex] = 0.0;
+        Temp[locIndex] = T0;
+    }
+    PhiDot [locIndex] = 0.0;
+    TempDot[locIndex] = 0.0;
 }
 
 // Laplace operator
 __device__
 float Laplace(float* field, int i, int j, int k)
 {
-
     float Laplacian = 0.0;
     for (int ii = -1; ii <= +1; ++ii)
     for (int jj = -1; jj <= +1; ++jj)
@@ -136,91 +144,84 @@ __global__
 void CalcTimeStep(float* Phi, float* PhiDot, float* Temp, float* TempDot)//, curandState * State)
 {
     // Calculate PhiDot and TempDot
-    int i = blockIdx.x * blockDim.x + threadIdx.x + BCELLS;
-    int j = blockIdx.y * blockDim.y + threadIdx.y + BCELLS;
-    int k = blockIdx.z * blockDim.z + threadIdx.z + BCELLS;
+    const int i = index_i();
+    const int j = index_j();
+    const int k = index_k();
 
-        int locIndex     = Index(i,j,k);
-        float locPhiDot = 0.0;
-        float locPhi    = Phi[locIndex];
-        // Calculate driving force m
-        if ((locPhi > Precision) ||  (locPhi < 1.0 - Precision))
+    int locIndex = index();
+    float locPhiDot = 0.0;
+    float locPhi    = Phi[locIndex];
+    // Calculate driving force m
+    if ((locPhi > Precision) ||  (locPhi < 1.0 - Precision))
+    {
+
+        float Q1 = 1.2*pi/4.0;
+        float Q2 = 0.0;
+        float Q3 = pi/4.0;
+
+        float c1 = cos(Q1);
+        float c2 = cos(Q2);
+        float c3 = cos(Q3);
+
+        float s1 = sin(Q1);
+        float s2 = sin(Q2);
+        float s3 = sin(Q3);
+
+        //This matrix follows XYZ notations (http://en.wikipedia.org/wiki/Euler_angles)
+        float Rot[3][3] = {{           c2*c3,           - c2*s3,      s2},
+                            {c1*s3 + c3*s1*s2,  c1*c3 - s1*s2*s3,  -c2*s1},
+                            {s1*s3 - c1*c3*s2,  c3*s1 + c1*s2*s3,   c1*c2}};
+
+        // Calculate gradient of Phi
+        float gradX = (Phi[Index(i+1,j,k)] - Phi[Index(i-1,j,k)])/(2*dx);
+        float gradY = (Phi[Index(i,j+1,k)] - Phi[Index(i,j-1,k)])/(2*dy);
+        float gradZ = (Phi[Index(i,j,k+1)] - Phi[Index(i,j,k-1)])/(2*dz);
+
+        float grad[3] = {gradX, gradY, gradZ};
+        float gradR[3] = {0.0, 0.0, 0.0};
+
+        for(int ii = 0; ii < 3; ++ii)
+        for(int jj = 0; jj < 3; ++jj)
         {
-
-            float Q1 = 1.2*std::numbers::pi/4.0;
-            float Q2 = 0.0;
-            float Q3 = std::numbers::pi/4.0;
-
-            float c1 = cos(Q1);
-            float c2 = cos(Q2);
-            float c3 = cos(Q3);
-
-            float s1 = sin(Q1);
-            float s2 = sin(Q2);
-            float s3 = sin(Q3);
-
-            //This matrix follows XYZ notations (http://en.wikipedia.org/wiki/Euler_angles)
-            float Rot[3][3] = {{           c2*c3,           - c2*s3,      s2},
-                                {c1*s3 + c3*s1*s2,  c1*c3 - s1*s2*s3,  -c2*s1},
-                                {s1*s3 - c1*c3*s2,  c3*s1 + c1*s2*s3,   c1*c2}};
-
-            // Calculate gradient of Phi
-            float gradX = (Phi[Index(i+1,j,k)] - Phi[Index(i-1,j,k)])/(2*dx);
-            float gradY = (Phi[Index(i,j+1,k)] - Phi[Index(i,j-1,k)])/(2*dy);
-            float gradZ = (Phi[Index(i,j,k+1)] - Phi[Index(i,j,k-1)])/(2*dz);
-
-            float grad[3] = {gradX, gradY, gradZ};
-            float gradR[3] = {0.0, 0.0, 0.0};
-
-            for(int ii = 0; ii < 3; ++ii)
-            for(int jj = 0; jj < 3; ++jj)
-            {
-                gradR[ii] += Rot[ii][jj] * grad[jj];
-            }
-
-            gradX = gradR[0];
-            gradY = gradR[1];
-            gradZ = gradR[2];
-
-            float div   = pow(pow(gradX,2) + pow(gradY,2) + pow(gradZ,2),2);
-            float theta = 0.0;
-            if ( div > 1.e-12)
-                theta = (pow(gradX,4) + pow(gradY,4)+ pow(gradZ,4))/div;
-            else
-                theta = 0.0;
-            float sigma = (1.-4.*delta*(1.-theta));
-
-            // Calculate noise
-            float noise = 0.0;//ampl * curand_uniform(&State[locIndex]);
-
-            // Calculate driving force am
-            float m = (alpha/std::numbers::pi) * atan(Gamma*(Tm - Temp[locIndex])*sigma);
-
-            // Add driving force to PhiDot
-            locPhiDot += locPhi*(1.0 - locPhi)*(locPhi - 0.5 + m + noise);
+            gradR[ii] += Rot[ii][jj] * grad[jj];
         }
-        // Calculate Laplacian-term
-        locPhiDot += pow(epsilon,2) * Laplace(Phi,i,j,k);
-        locPhiDot /= tau;
 
-        PhiDot [locIndex] += locPhiDot;
-        TempDot[locIndex] += Laplace(Temp,i,j,k) + kappa * locPhiDot;
+        gradX = gradR[0];
+        gradY = gradR[1];
+        gradZ = gradR[2];
 
+        float div   = pow(pow(gradX,2) + pow(gradY,2) + pow(gradZ,2),2);
+        float theta = 0.0;
+        if ( div > 1.e-12)
+            theta = (pow(gradX,4) + pow(gradY,4)+ pow(gradZ,4))/div;
+        else
+            theta = 0.0;
+        float sigma = (1.-4.*delta*(1.-theta));
+
+        // Calculate noise
+        float noise = 0.0;//ampl * curand_uniform(&State[locIndex]);
+
+        // Calculate driving force am
+        float m = (alpha/pi) * atan(Gamma*(Tm - Temp[locIndex])*sigma);
+
+        // Add driving force to PhiDot
+        locPhiDot += locPhi*(1.0 - locPhi)*(locPhi - 0.5 + m + noise);
+    }
+    // Calculate Laplacian-term
+    locPhiDot += pow(epsilon,2) * Laplace(Phi,i,j,k);
+    locPhiDot /= tau;
+
+    PhiDot [locIndex] += locPhiDot;
+    TempDot[locIndex] += Laplace(Temp,i,j,k) + kappa * locPhiDot;
 }
 
 __global__
 void ApplyTimeStep(float* field, float* fieldDot)
 {
-    // Define global indices of the device memory
-    int i = blockIdx.x * blockDim.x + threadIdx.x + BCELLS;
-    int j = blockIdx.y * blockDim.y + threadIdx.y + BCELLS;
-    int k = blockIdx.z * blockDim.z + threadIdx.z + BCELLS;
+    const int locIndex = index();
 
-        int locIndex = Index(i,j,k);
-        // Update fields
-        field    [locIndex] += dt * fieldDot [locIndex];
-        fieldDot [locIndex]  = 0.0;
-
+    field    [locIndex] += dt * fieldDot [locIndex];
+    fieldDot [locIndex]  = 0.0;
 }
 
 __global__
@@ -231,10 +232,9 @@ void SetBoundariesYZ(float* field)
     int b = blockIdx.y * blockDim.y + threadIdx.y;
     int k = blockIdx.z * blockDim.z + threadIdx.z;
 
-        // Apply mirror boundary conditions
-        field[Index(b     ,j,k)] = field[Index( 2*BCELLS-1-b,j,k)];
-        field[Index(Mx-1-b,j,k)] = field[Index(Mx-2*BCELLS+b,j,k)];
-
+    // Apply mirror boundary conditions
+    field[Index(b     ,j,k)] = field[Index( 2*BCELLS-1-b,j,k)];
+    field[Index(Mx-1-b,j,k)] = field[Index(Mx-2*BCELLS+b,j,k)];
 }
 
 __global__
@@ -245,10 +245,9 @@ void SetBoundariesXZ(float* field)
     int b = blockIdx.y * blockDim.y + threadIdx.y;
     int k = blockIdx.z * blockDim.z + threadIdx.z;
 
-        // Apply mirror boundary conditions
-        field[Index(i,b     ,k)] = field[Index(i, 2*BCELLS-1-b,k)];
-        field[Index(i,My-1-b,k)] = field[Index(i,My-2*BCELLS+b,k)];
-
+    // Apply mirror boundary conditions
+    field[Index(i,b     ,k)] = field[Index(i, 2*BCELLS-1-b,k)];
+    field[Index(i,My-1-b,k)] = field[Index(i,My-2*BCELLS+b,k)];
 }
 
 __global__
@@ -259,10 +258,9 @@ void SetBoundariesXY(float* field)
     int b = blockIdx.y * blockDim.y + threadIdx.y;
     int j = blockIdx.z * blockDim.z + threadIdx.z;
 
-        // Apply mirror boundary conditions
-        field[Index(i,j,b     )] = field[Index(i,j, 2*BCELLS-1-b)];
-        field[Index(i,j,Mz-1-b)] = field[Index(i,j,Mz-2*BCELLS+b)];
-
+    // Apply mirror boundary conditions
+    field[Index(i,j,b     )] = field[Index(i,j, 2*BCELLS-1-b)];
+    field[Index(i,j,Mz-1-b)] = field[Index(i,j,Mz-2*BCELLS+b)];
 }
 
 __host__
@@ -280,7 +278,7 @@ void SetBoundaries(float* field)
 
     // Set Boundary conditions
     SetBoundariesYZ<<< dimGridYZ, dimBlockYZ >>>(field);
-    SetBoundariesXZ<<< dimGridYZ, dimBlockYZ >>>(field);
+    SetBoundariesXZ<<< dimGridXZ, dimBlockXZ >>>(field);
     SetBoundariesXY<<< dimGridXY, dimBlockXY >>>(field);
 }
 
@@ -340,9 +338,10 @@ int main()
         // Make Output if necessary
         if(tStep%tScreen == 0)
         {
-            cout << "Time step: " << tStep << "/" << Nt << endl;
-            if (WriteToDisk%tOut == 0)
+            cout << "Time step: " << tStep << "/" << Nt << "\n";
+            if (WriteToDisk &&  tStep%tOut == 0)
             {
+                cout << "Write to file \n";
                 cudaMemcpy(Phi,  devPhi,  size, cudaMemcpyDeviceToHost);
                 cudaMemcpy(Temp, devTemp, size, cudaMemcpyDeviceToHost);
                 WriteToFile(tStep, Phi,  "PhaseField");
@@ -386,12 +385,7 @@ __global__
 void InitializeRandomNumbers( curandState *state)
 {
     // Define indices of the device memory
-    int i = blockIdx.x * blockDim.x + threadIdx.x + BCELLS;
-    int j = blockIdx.y * blockDim.y + threadIdx.y + BCELLS;
-    int k = blockIdx.z * blockDim.z + threadIdx.z + BCELLS;
-
-    int locIndex = Index(i,j,k);
-
+    int locIndex = index();
     curand_init ( seed, locIndex, 0, &state[locIndex] );
 }
 
