@@ -297,42 +297,48 @@ void SetBoundaries(float* field)
     InvokeKernelYZ(SetBoundariesYZ,field);
 }
 
+//struct device_data_t
+//{
+//    float* data;
+//    device_data_t(size_t size)
+//    {
+//        cudaMalloc((void**)&data,size);
+//        cudaMemset(data,0.0,size);
+//    }
+//    ~device_data_t()
+//    {
+//        cudaFree(data);
+//    }
+//    float& [](size_t idx)
+//    {
+//        return[idx];
+//    }
+//};
+
+
 int main()
 {
     // Calculate memory size
     int numElements = Mx * My * Mz;
     size_t size = numElements * sizeof(float);
 
-    // Define and allocate host memory
-    float* Phi     = (float *)malloc(size);  memset(Phi,     0, size);
-    float* Temp    = (float *)malloc(size);  memset(Temp,    0, size);
-
-    // Allocate Device Memory
-    float* devPhi;
-    float* devPhiDot;
-    float* devTemp;
-    float* devTempDot;
-    //curandState* devState;  // Used for random number generation
-
-    // Allocate device memory and initialize it
-    cudaMalloc((void**)&devPhi,     size);  cudaMemset(devPhi,     0, size);
-    cudaMalloc((void**)&devPhiDot,  size);  cudaMemset(devPhiDot,  0, size);
-    cudaMalloc((void**)&devTemp,    size);  cudaMemset(devTemp,    0, size);
-    cudaMalloc((void**)&devTempDot, size);  cudaMemset(devTempDot, 0, size);
-    //cudaMalloc((void**)&devState,   size);  cudaMemset(devState,   0, size);
+    float* Phi;     cudaMallocManaged((void**)&Phi,     size); cudaMemset(Phi,     0.f, size);
+    float* Temp;    cudaMallocManaged((void**)&Temp,    size); cudaMemset(Temp,    0.f, size);
+    float* PhiDot;  cudaMalloc       ((void**)&PhiDot,  size); cudaMemset(PhiDot,  0.f, size);
+    float* TempDot; cudaMalloc       ((void**)&TempDot, size); cudaMemset(TempDot, 0.f, size);
 
     // Verify that allocations succeeded
     cudaError_t err = cudaPeekAtLastError();
     if (err != cudaSuccess)
     {
         cout << "Failed to allocate device memory! "
-             << "(" << cudaGetErrorString(err) << ")" << endl;
+             << "(" << cudaGetErrorString(err) << ")\n" << endl;
         exit(EXIT_FAILURE);
     }
 
     // Initialize Fields
     cout << "Initialized Data: " << Nx << "x" << Ny << "x" << Nz << endl;
-    InvokeKernel(InitializeSupercooledSphere, devPhi, devPhiDot, devTemp, devPhiDot);
+    InvokeKernel(InitializeSupercooledSphere, Phi, PhiDot, Temp, PhiDot);
 
     // Initialize Random seed
     //cout << "Initialize Random Seed.." << endl;
@@ -353,19 +359,17 @@ int main()
             if (WriteToDisk &&  tStep%tOut == 0)
             {
                 cout << "Write to file \n";
-                cudaMemcpy(Phi,  devPhi,  size, cudaMemcpyDeviceToHost);
-                cudaMemcpy(Temp, devTemp, size, cudaMemcpyDeviceToHost);
                 WriteToFile(tStep, Phi,  "PhaseField");
                 WriteToFile(tStep, Temp, "Temperature");
             }
         }
 
-        SetBoundaries(devPhi);
-        SetBoundaries(devTemp);
+        SetBoundaries(Phi);
+        SetBoundaries(Temp);
 
-        InvokeKernel(CalcTimeStep, devPhi, devPhiDot, devTemp, devTempDot);
-        InvokeKernel(ApplyTimeStep, devPhi, devPhiDot);
-        InvokeKernel(ApplyTimeStep, devTemp, devTempDot);
+        InvokeKernel(CalcTimeStep,  Phi,  PhiDot, Temp, TempDot);
+        InvokeKernel(ApplyTimeStep, Phi,  PhiDot);
+        InvokeKernel(ApplyTimeStep, Temp, TempDot);
     }
 
     // Stop run time measurement
@@ -375,13 +379,10 @@ int main()
     //cout << "Calculation time for " << Nt << " time step: " << simTime << " s" << endl;
 
     // Cleanup
-    free(Phi);
-    free(Temp);
-
-    cudaFree(devPhi);
-    cudaFree(devPhiDot);
-    cudaFree(devTemp);
-    cudaFree(devTempDot);
+    cudaFree(Phi);
+    cudaFree(PhiDot);
+    cudaFree(Temp);
+    cudaFree(TempDot);
 
     cudaDeviceReset();
 
@@ -398,7 +399,6 @@ void InitializeRandomNumbers( curandState *state)
 
 void WriteToFile(const int tStep, float* field, string name)
 {
-    {
     stringstream filename;
     filename << "Out_" << name << "_"<< tStep << ".vtk";
     string FileName = filename.str();
@@ -430,5 +430,4 @@ void WriteToFile(const int tStep, float* field, string name)
         vtk_file << field[locIndex] << endl;
     }
     vtk_file.close();
-    }
 }
