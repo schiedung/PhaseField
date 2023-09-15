@@ -35,7 +35,6 @@ using namespace std;
 const int Nx = DIM_GRID_X * DIM_BLOCK_X;  // Domain size in x-direction
 const int Ny = DIM_GRID_Y * DIM_BLOCK_Y;  // Domain size in y-direction
 const int Nz = DIM_GRID_Z * DIM_BLOCK_Z;  // Domain size in z-direction
-
 // Define memory size
 const int Mx = Nx + 2 * BCELLS;  // Memory size in x-direction
 const int My = Ny + 2 * BCELLS;  // Memory size in y-direction
@@ -45,7 +44,7 @@ const int Mz = Nz + 2 * BCELLS;  // Memory size in z-direction
 const int Nt      = 5000; // Number of time steps
 const int tOut    = 1000;  // Output distance in time steps
 const int tScreen = 10;    // Output distance to screen
-bool WriteToDisk = true;
+bool WriteToDisk = false;
 
 // Define grid spacing
 __constant__ float dt = 1.0e-4;  // Size of time step [s]
@@ -82,23 +81,51 @@ const int seed = 123; // Random number seed
 void WriteToFile(const int tStep, float* field, string name);
 //__global__ void InitializeRandomNumbers( curandState *state);
 
-__device__
-int index_i() { return blockIdx.x * blockDim.x + threadIdx.x + BCELLS; }
-
-__device__
-int index_j() { return blockIdx.y * blockDim.y + threadIdx.y + BCELLS; }
-
-__device__
-int index_k() { return blockIdx.z * blockDim.z + threadIdx.z + BCELLS; }
-
-__device__
-int index() { return (index_k() * My + index_j()) * Mx + index_i(); }
+__device__ int index_i() { return blockIdx.x * blockDim.x + threadIdx.x + BCELLS; }
+__device__ int index_j() { return blockIdx.y * blockDim.y + threadIdx.y + BCELLS; }
+__device__ int index_k() { return blockIdx.z * blockDim.z + threadIdx.z + BCELLS; }
+__device__ int index() { return (index_k() * My + index_j()) * Mx + index_i(); }
 
 __host__ __device__
 inline int Index(int i, int j, int k)
 {
-    // Define index of the memory
     return (k * My + j) * Mx + i;
+}
+
+template<class function, typename... Args>
+void InvokeKernel(function func, Args... args)
+{
+    const dim3 dimGrid( DIM_GRID_X  , DIM_GRID_Y  , DIM_GRID_Z );
+    const dim3 dimBlock(DIM_BLOCK_X , DIM_BLOCK_Y , DIM_BLOCK_Z);
+
+    func<<< dimGrid, dimBlock >>>(args...);
+}
+
+template<class function, typename... Args>
+void InvokeKernelXY(function func, Args... args)
+{
+    const dim3 dimGridXY( 1 , 1 , My );
+    const dim3 dimBlockXY( Mx , BCELLS , 1 );
+
+    func<<< dimGridXY, dimBlockXY >>>(args...);
+}
+
+template<class function, typename... Args>
+void InvokeKernelXZ(function func, Args... args)
+{
+    const dim3 dimGridXZ( 1 , 1 , Mx );
+    const dim3 dimBlockXZ( Mz , BCELLS , 1 );
+
+    func<<< dimGridXZ, dimBlockXZ >>>(args...);
+}
+
+template<class function, typename... Args>
+ void InvokeKernelYZ(function func, Args... args)
+{
+    const dim3 dimGridYZ( 1 , 1 , Mz );
+    const dim3 dimBlockYZ( My , BCELLS , 1 );
+
+    func<<< dimGridYZ, dimBlockYZ >>>(args...);
 }
 
 __global__
@@ -147,8 +174,8 @@ void CalcTimeStep(float* Phi, float* PhiDot, float* Temp, float* TempDot)//, cur
     const int i = index_i();
     const int j = index_j();
     const int k = index_k();
+    const int locIndex = index();
 
-    int locIndex = index();
     float locPhiDot = 0.0;
     float locPhi    = Phi[locIndex];
     // Calculate driving force m
@@ -263,23 +290,11 @@ void SetBoundariesXY(float* field)
     field[Index(i,j,Mz-1-b)] = field[Index(i,j,Mz-2*BCELLS+b)];
 }
 
-__host__
 void SetBoundaries(float* field)
 {
-
-    // Define grid/block structure
-    dim3 dimGridYZ( 1 , 1 , Mz );
-    dim3 dimGridXZ( 1 , 1 , Mx );
-    dim3 dimGridXY( 1 , 1 , My );
-
-    dim3 dimBlockYZ( My , BCELLS , 1 );
-    dim3 dimBlockXZ( Mz , BCELLS , 1 );
-    dim3 dimBlockXY( Mx , BCELLS , 1 );
-
-    // Set Boundary conditions
-    SetBoundariesYZ<<< dimGridYZ, dimBlockYZ >>>(field);
-    SetBoundariesXZ<<< dimGridXZ, dimBlockXZ >>>(field);
-    SetBoundariesXY<<< dimGridXY, dimBlockXY >>>(field);
+    InvokeKernelXY(SetBoundariesXY,field);
+    InvokeKernelXZ(SetBoundariesXZ,field);
+    InvokeKernelYZ(SetBoundariesYZ,field);
 }
 
 int main()
@@ -315,13 +330,9 @@ int main()
         exit(EXIT_FAILURE);
     }
 
-    // Define grid/block structure
-    dim3 dimGrid(   DIM_GRID_X  , DIM_GRID_Y  , DIM_GRID_Z );
-    dim3 dimBlock(  DIM_BLOCK_X , DIM_BLOCK_Y , DIM_BLOCK_Z);
-
     // Initialize Fields
     cout << "Initialized Data: " << Nx << "x" << Ny << "x" << Nz << endl;
-    InitializeSupercooledSphere<<< dimGrid, dimBlock >>>(devPhi, devPhiDot, devTemp, devPhiDot);
+    InvokeKernel(InitializeSupercooledSphere, devPhi, devPhiDot, devTemp, devPhiDot);
 
     // Initialize Random seed
     //cout << "Initialize Random Seed.." << endl;
@@ -349,16 +360,12 @@ int main()
             }
         }
 
-        // Set boundary conditions
         SetBoundaries(devPhi);
         SetBoundaries(devTemp);
 
-        // Calculate and apply time step
-        CalcTimeStep <<< dimGrid, dimBlock >>>(devPhi, devPhiDot, devTemp, devTempDot);//, devState);
-
-        // Apply time step
-        ApplyTimeStep<<< dimGrid , dimBlock >>>(devPhi  , devPhiDot);
-        ApplyTimeStep<<< dimGrid , dimBlock >>>(devTemp , devTempDot);
+        InvokeKernel(CalcTimeStep, devPhi, devPhiDot, devTemp, devTempDot);
+        InvokeKernel(ApplyTimeStep, devPhi, devPhiDot);
+        InvokeKernel(ApplyTimeStep, devTemp, devTempDot);
     }
 
     // Stop run time measurement
