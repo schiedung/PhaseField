@@ -16,29 +16,13 @@
 //#include <numbers>
 //#include <sys/time.h>
 
+#include "wrapper.h"
+#include "vtk.h"
+
 constexpr double pi = 3.14159265359;
 
 using namespace std;
 
-// Define number of Boundary Cells
-#define BCELLS 1
-// Define CUDA-Block dimensions
-#define DIM_BLOCK_X 8
-#define DIM_BLOCK_Y 8
-#define DIM_BLOCK_Z 8
-// Define CUDA-Grid dimensions
-#define DIM_GRID_X  16
-#define DIM_GRID_Y  16
-#define DIM_GRID_Z  16
-
-// Define computation domain size
-const int Nx = DIM_GRID_X * DIM_BLOCK_X;  // Domain size in x-direction
-const int Ny = DIM_GRID_Y * DIM_BLOCK_Y;  // Domain size in y-direction
-const int Nz = DIM_GRID_Z * DIM_BLOCK_Z;  // Domain size in z-direction
-// Define memory size
-const int Mx = Nx + 2 * BCELLS;  // Memory size in x-direction
-const int My = Ny + 2 * BCELLS;  // Memory size in y-direction
-const int Mz = Nz + 2 * BCELLS;  // Memory size in z-direction
 
 // Define number of time steps
 const int Nt      = 5000; // Number of time steps
@@ -78,55 +62,6 @@ __constant__ float LaplacianStencil27[3][3][3] = {{{1.0/30.0,   1.0/10.0, 1.0/30
                                              {1.0/30.0,   1.0/10.0, 1.0/30.0}}};///< 27 point Laplacian stencil by Spotz and Carey (1995)
 // Misc parameters
 const int seed = 123; // Random number seed
-void WriteToFile(const int tStep, float* field, string name);
-//__global__ void InitializeRandomNumbers( curandState *state);
-
-__device__ int index_i() { return blockIdx.x * blockDim.x + threadIdx.x + BCELLS; }
-__device__ int index_j() { return blockIdx.y * blockDim.y + threadIdx.y + BCELLS; }
-__device__ int index_k() { return blockIdx.z * blockDim.z + threadIdx.z + BCELLS; }
-__device__ int index() { return (index_k() * My + index_j()) * Mx + index_i(); }
-
-__host__ __device__
-inline int Index(int i, int j, int k)
-{
-    return (k * My + j) * Mx + i;
-}
-
-template<class function, typename... Args>
-void InvokeKernel(function func, Args... args)
-{
-    const dim3 dimGrid( DIM_GRID_X  , DIM_GRID_Y  , DIM_GRID_Z );
-    const dim3 dimBlock(DIM_BLOCK_X , DIM_BLOCK_Y , DIM_BLOCK_Z);
-
-    func<<< dimGrid, dimBlock >>>(args...);
-}
-
-template<class function, typename... Args>
-void InvokeKernelXY(function func, Args... args)
-{
-    const dim3 dimGridXY( 1 , 1 , My );
-    const dim3 dimBlockXY( Mx , BCELLS , 1 );
-
-    func<<< dimGridXY, dimBlockXY >>>(args...);
-}
-
-template<class function, typename... Args>
-void InvokeKernelXZ(function func, Args... args)
-{
-    const dim3 dimGridXZ( 1 , 1 , Mx );
-    const dim3 dimBlockXZ( Mz , BCELLS , 1 );
-
-    func<<< dimGridXZ, dimBlockXZ >>>(args...);
-}
-
-template<class function, typename... Args>
- void InvokeKernelYZ(function func, Args... args)
-{
-    const dim3 dimGridYZ( 1 , 1 , Mz );
-    const dim3 dimBlockYZ( My , BCELLS , 1 );
-
-    func<<< dimGridYZ, dimBlockYZ >>>(args...);
-}
 
 __global__
 void InitializeSupercooledSphere(float* Phi, float* PhiDot, float* Temp,
@@ -154,7 +89,7 @@ void InitializeSupercooledSphere(float* Phi, float* PhiDot, float* Temp,
     TempDot[locIndex] = 0.0;
 }
 
-// Laplace operator
+// Laplace operatorhttps://hub.virtamate.com/resources/yuffie-ffvii-monthly-commission.15728/
 __device__
 float Laplace(float* field, int i, int j, int k)
 {
@@ -251,70 +186,6 @@ void ApplyTimeStep(float* field, float* fieldDot)
     fieldDot [locIndex]  = 0.0;
 }
 
-__global__
-void SetBoundariesYZ(float* field)
-{
-    // Define global indices of the device memory
-    int j = blockIdx.x * blockDim.x + threadIdx.x;
-    int b = blockIdx.y * blockDim.y + threadIdx.y;
-    int k = blockIdx.z * blockDim.z + threadIdx.z;
-
-    // Apply mirror boundary conditions
-    field[Index(b     ,j,k)] = field[Index( 2*BCELLS-1-b,j,k)];
-    field[Index(Mx-1-b,j,k)] = field[Index(Mx-2*BCELLS+b,j,k)];
-}
-
-__global__
-void SetBoundariesXZ(float* field)
-{
-    // Define global indices of the device memory
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    int b = blockIdx.y * blockDim.y + threadIdx.y;
-    int k = blockIdx.z * blockDim.z + threadIdx.z;
-
-    // Apply mirror boundary conditions
-    field[Index(i,b     ,k)] = field[Index(i, 2*BCELLS-1-b,k)];
-    field[Index(i,My-1-b,k)] = field[Index(i,My-2*BCELLS+b,k)];
-}
-
-__global__
-void SetBoundariesXY(float* field)
-{
-    // Define global indices of the device memory
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    int b = blockIdx.y * blockDim.y + threadIdx.y;
-    int j = blockIdx.z * blockDim.z + threadIdx.z;
-
-    // Apply mirror boundary conditions
-    field[Index(i,j,b     )] = field[Index(i,j, 2*BCELLS-1-b)];
-    field[Index(i,j,Mz-1-b)] = field[Index(i,j,Mz-2*BCELLS+b)];
-}
-
-void SetBoundaries(float* field)
-{
-    InvokeKernelXY(SetBoundariesXY,field);
-    InvokeKernelXZ(SetBoundariesXZ,field);
-    InvokeKernelYZ(SetBoundariesYZ,field);
-}
-
-//struct device_data_t
-//{
-//    float* data;
-//    device_data_t(size_t size)
-//    {
-//        cudaMalloc((void**)&data,size);
-//        cudaMemset(data,0.0,size);
-//    }
-//    ~device_data_t()
-//    {
-//        cudaFree(data);
-//    }
-//    float& [](size_t idx)
-//    {
-//        return[idx];
-//    }
-//};
-
 
 int main()
 {
@@ -342,7 +213,6 @@ int main()
 
     // Initialize Random seed
     //cout << "Initialize Random Seed.." << endl;
-    //InitializeRandomNumbers<<< dimGrid, dimBlock >>>(devState);
     cudaDeviceSynchronize();
 
     // Start run time measurement
@@ -389,45 +259,4 @@ int main()
     return 0;
 }
 
-__global__
-void InitializeRandomNumbers( curandState *state)
-{
-    // Define indices of the device memory
-    int locIndex = index();
-    curand_init ( seed, locIndex, 0, &state[locIndex] );
-}
 
-void WriteToFile(const int tStep, float* field, string name)
-{
-    stringstream filename;
-    filename << "Out_" << name << "_"<< tStep << ".vtk";
-    string FileName = filename.str();
-
-    ofstream vtk_file(FileName.c_str());
-    vtk_file << "# vtk DataFile Version 3.0\n";
-    vtk_file << name << " \n";
-    vtk_file << "ASCII\n";
-    vtk_file << "DATASET RECTILINEAR_GRID\n";
-    vtk_file << "DIMENSIONS " << Nx << " " << Ny << " " << Nz << endl;
-    vtk_file << "X_COORDINATES " << Nx << " float\n";
-    for (int i = 0; i < Nx; i++) vtk_file << i << " ";
-    vtk_file << endl;
-    vtk_file << "Y_COORDINATES " << Ny << " float\n";
-    for (int j = 0; j < Ny; j++) vtk_file << j << " ";
-    vtk_file << endl;
-    vtk_file << "Z_COORDINATES " << Nz << " float\n";
-    for (int k = 0; k < Nz; k++) vtk_file << k << " ";
-    vtk_file << endl;
-    vtk_file << "POINT_DATA " << Nx*Ny*Nz << endl;
-
-    vtk_file << "SCALARS " << name << " float 1\n";
-    vtk_file << "LOOKUP_TABLE default\n";
-    for (int k = BCELLS; k < Nz + BCELLS; ++k)
-    for (int j = BCELLS; j < Ny + BCELLS; ++j)
-    for (int i = BCELLS; i < Nx + BCELLS; ++i)
-    {
-        int locIndex = Index(i,j,k);
-        vtk_file << field[locIndex] << endl;
-    }
-    vtk_file.close();
-}
