@@ -12,5 +12,5 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: make
-      run: g++ --version
+    - name: make-kobayashi-cpu
+      run: make -C Kobayashi
