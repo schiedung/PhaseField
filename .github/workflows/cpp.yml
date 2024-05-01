@@ -13,5 +13,4 @@ jobs:
 
     steps:
     - name: make-kobayashi-cpu
-    - run: ls -l
-    - run: make -C kobayashi/cpu
+      run: ls -l
