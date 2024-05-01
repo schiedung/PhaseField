@@ -14,3 +14,6 @@ jobs:
     - name: make-kobayashi-cpu
       run: make
       working-directory: kobayashi/cpu
+    - name: make-physical-cpu
+      run: make
+      working-directory: physical/cpu
