@@ -8,10 +8,9 @@ on:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
-
     steps:
     - uses: actions/checkout@v4
     - name: make-kobayashi-cpu
-      run: ls -l
+      run: make
+      working-directory: kobayashi/cpu
