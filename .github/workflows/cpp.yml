@@ -11,9 +11,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-    - name: make-kobayashi-cpu
+    - name: bulid-kobayashi-cpu
       run: make
       working-directory: kobayashi/cpu
-    - name: make-physical-cpu
+    - name: build-kobayashi-gpu
+      working-directory: kobayashi/gpu
+      run: |
+          mkdir build
+          cd build
+          cmake ..
+          cmake --build .
+    - name: build-physical-cpu
       run: make
       working-directory: physical/cpu
