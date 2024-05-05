@@ -13,7 +13,10 @@ jobs:
     - uses: actions/checkout@v4
     - name: bulid-kobayashi-cpu
       run: make
-      working-directory: kobayashi/cpu
+      working-directory: apps/kobayashi-cpu
+    - name: build-physical-cpu
+      run: make
+      working-directory: apps/physical-cpu
 #    - name: build-kobayashi-gpu
 #      working-directory: kobayashi/gpu
 #      run: |
@@ -21,6 +24,4 @@ jobs:
 #          cd build
 #          cmake ..
 #          cmake --build .
-    - name: build-physical-cpu
-      run: make
-      working-directory: physical/cpu
+
