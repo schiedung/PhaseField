@@ -105,8 +105,9 @@ void InitializeSupercooledSphere(double* Phi, double* PhiDot, double* Temp,
     {
         int locIndex = Index(i,j,k);
         // Initialize the phase Field
-        double r = std::sqrt(std::pow(i*dx-x0,2) + std::pow(j*dy-y0,2) + std::pow(k*dz-z0,2));
-        if ( r < Radius)
+        //double r = std::sqrt(std::pow(i*dx-x0,2) + std::pow(j*dy-y0,2) + std::pow(k*dz-z0,2));
+        //if ( r < Radius)
+        if ( i*dx < x0 )
         {
             Phi    [locIndex] = 1.0;
             Temp   [locIndex] = Tm;
@@ -114,7 +115,7 @@ void InitializeSupercooledSphere(double* Phi, double* PhiDot, double* Temp,
         else
         {
             Phi    [locIndex] = 0.0;
-            Temp   [locIndex] = T0;
+            Temp   [locIndex] = Tm;
         }
 
         PhiDot [locIndex] = 0.0;
@@ -162,7 +163,7 @@ void CalcTimeStep(double* Phi, double* PhiDot, double* Temp, double* TempDot)
         double locPhiDot = 0.0;
         locPhiDot += Mobility*sigma*Laplace(Phi,i,j,k);
         locPhiDot -= Mobility*sigma*pi*pi/eta/eta/2.0*(0.5-locPhi);
-        //locPhiDot -= pi/eta*std::sqrt(std::abs(locPhi*(1.0-locPhi)))*dg;
+        locPhiDot -= pi/eta*std::sqrt(locPhi*(1.0-locPhi))*dg;
 
         PhiDot [locIndex] += locPhiDot;
         TempDot[locIndex] += Laplace(Temp,i,j,k) + L/cp * locPhiDot;
