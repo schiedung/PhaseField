@@ -226,9 +226,9 @@ void SetBoundariesZ(double* field)
 void SetBoundaryConditions(double* field)
 {
     // Set Boundary conditions
-    SetBoundariesX(field);
-    SetBoundariesY(field);
-    SetBoundariesZ(field);
+    if (Nx > 0) SetBoundariesX(field);
+    if (Ny > 0) SetBoundariesY(field);
+    if (Nz > 0) SetBoundariesZ(field);
 }
 
 void StartSimulation()
