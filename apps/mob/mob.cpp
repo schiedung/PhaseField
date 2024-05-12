@@ -1,11 +1,13 @@
-#include <cstdlib>
+#include <chrono>
 #include <cmath>
+#include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <iostream>
-//#include <omp.h>
+#include <numbers>
 #include <sstream>
-#include <cstring>
-#include <chrono>
+#include <cfenv>
+//#include <omp.h>
 
 // Define number of Boundary Cells
 #define BCELLS 1
@@ -13,7 +15,7 @@
 // Define computation domain size
 const int Nx = 64;  // Domain size in x-direction
 const int Ny = 64;  // Domain size in y-direction
-const int Nz = 256;  // Domain size in z-direction
+const int Nz = 1;   // Domain size in z-direction
 
 // Define memory size
 const int Mx = Nx + 2 * BCELLS;  // Memory size in x-direction
@@ -31,19 +33,19 @@ const double dy = 0.03;   // Grid spacing in y-direction [m]
 const double dz = 0.03;   // Grid spacing in z-direction [m]
 const double dt = 1.0e-4; // Size of time step [s]
 
-// Kobayashi's parameters (not exactly his..)
-const double epsilon = 0.010;   // Gradient energy coefficient
-const double tau     = 3.0e-4;  // Inverse of interface mobility [s]
-const double alpha   = 0.8;     // Coefficient of driving force
-const double Gamma   = 10.0;    // Coefficient of driving force
-const double delta   = 0.00;    // Anisotropy in (0,1)
-const double K       = 1.7;     // Referrers to latent heat (no-dimension)
-const double T0      = 0.0;     // Initial temperature
-const double Tm      = 1.0;     // Equilibrium temperature  (no-dimension)
+const double Mobility = dx*dx/dt/5;     // Mobility coefficient
+const double sigma    = 1.0;     // Interface energy coefficient
+const double ieta     = 5.0;     // Interface thickness [1]
+const double eta      = ieta*dx; // Interface thickness [m]
+const double rho      = 1.0;     // Density [kg/m^3]
+const double L        = 1.0;     // Latent heat [J/kg]
+const double cp       = 1.0;     // Specific heat [J/kgK]
+const double cv       = rho*cp;  // volumetric heat capacity [J/m^3K]
+const double T0       = 1.0;     // Initial temperature [K]
+const double Tm       = 1.0;     // Equilibrium temperature [K]
 
 // Misc parameters
-const double Radius        = 0.4;    // Initial radius of spherical grain
-const double PhiPrecision  = 1.e-9;  // Phase-field cut off
+const double Radius  = 25*dx;    // Initial radius of spherical grain
 
 void WriteToFile(const int tStep, double* field, std::string name)
 {
@@ -92,9 +94,9 @@ void InitializeSupercooledSphere(double* Phi, double* PhiDot, double* Temp,
         double* TempDot)
 {
     // Initialization
-    const double x0 = 0.0;//Nx/2 * dx;
-    const double y0 = 0.0;//Ny/2 * dy;
-    const double z0 = 0.0;//Nz/2 * dz;
+    const double x0 = Nx/2 * dx;
+    const double y0 = Ny/2 * dy;
+    const double z0 = Nz/2 * dz;
 
     #pragma omp parallel for schedule(auto) collapse(2)
     for (int i = BCELLS; i < Nx + BCELLS; i++)
@@ -137,14 +139,13 @@ double Laplace(double* field, int i, int j, int k)
     df2_dy2 += field[Index(i,j-1,k)];
     df2_dy2 /= dy*dy;
 
-    df2_dz2 += field[Index(i,j,k+1)];
-    df2_dz2 -= field[Index(i,j,k  )] * 2.0;
-    df2_dz2 += field[Index(i,j,k-1)];
-    df2_dz2 /= dz*dz;
+    //df2_dz2 += field[Index(i,j,k+1)];
+    //df2_dz2 -= field[Index(i,j,k  )] * 2.0;
+    //df2_dz2 += field[Index(i,j,k-1)];
+    //df2_dz2 /= dz*dz;
 
     return df2_dx2 + df2_dy2 + df2_dz2;
 }
-
 
 void CalcTimeStep(double* Phi, double* PhiDot, double* Temp, double* TempDot)
 {
@@ -154,36 +155,17 @@ void CalcTimeStep(double* Phi, double* PhiDot, double* Temp, double* TempDot)
     for (int j = BCELLS; j < Ny + BCELLS; j++)
     for (int k = BCELLS; k < Nz + BCELLS; k++)
     {
-        int    locIndex  = Index(i,j,k);
-        double locPhi    = Phi[locIndex];
+        const int    locIndex  = Index(i,j,k);
+        const double pi        = std::numbers::pi;
+        const double dg        = cv*(Temp[locIndex] - Tm);
+        const double locPhi    = Phi[locIndex];
         double locPhiDot = 0.0;
-        // Calculate driving force m
-        if ((locPhi > 0.0) or  (locPhi < 1.0))
-        {
-            // Calculate gradient of Phi
-            double gradX = (Phi[Index(i+1,j,k)] - Phi[Index(i-1,j,k)])/(2*dx);
-            double gradY = (Phi[Index(i,j+1,k)] - Phi[Index(i,j-1,k)])/(2*dy);
-            double gradZ = (Phi[Index(i,j,k+1)] - Phi[Index(i,j,k-1)])/(2*dz);
-            double div   = std::pow(std::pow(gradX,2) + std::pow(gradY,2) + std::pow(gradZ,2),2);
-            double theta;
-            if ( div > 1.e-12)
-                theta = (std::pow(gradX,4) + std::pow(gradY,4)+ std::pow(gradZ,4))/div;
-            else
-                theta = 0.0;
-            double sigma = (1.-4.*delta*(1.-theta));
-
-            // Calculate driving force am
-            double m = (alpha/M_PI) * std::atan(Gamma*(Tm - Temp[locIndex])*sigma);
-
-            // Add driving force to PhiDot
-            locPhiDot += locPhi*(1.0 - locPhi)*(locPhi - 0.5 + m);
-        }
-        // Calculate Laplacian-term
-        locPhiDot += pow(epsilon,2) * Laplace(Phi,i,j,k);
-        locPhiDot /= tau;
+        locPhiDot += Mobility*sigma*Laplace(Phi,i,j,k);
+        locPhiDot -= Mobility*sigma*pi*pi/eta/eta/2.0*(0.5-locPhi);
+        //locPhiDot -= pi/eta*std::sqrt(std::abs(locPhi*(1.0-locPhi)))*dg;
 
         PhiDot [locIndex] += locPhiDot;
-        TempDot[locIndex] += Laplace(Temp,i,j,k) + K * locPhiDot;
+        TempDot[locIndex] += Laplace(Temp,i,j,k) + L/cp * locPhiDot;
     }
 }
 
@@ -201,6 +183,10 @@ void ApplyTimeStep(double* Phi, double* PhiDot, double* Temp, double* TempDot)
         PhiDot [locIndex]  = 0.0;
         Temp   [locIndex] += dt * TempDot[locIndex];
         TempDot[locIndex]  = 0.0;
+
+        // Limit phase-field values to [0,1]
+        if      (Phi[locIndex] < 0.0) Phi[locIndex] = 0.0;
+        else if (Phi[locIndex] > 1.0) Phi[locIndex] = 1.0;
     }
 }
 
@@ -247,6 +233,9 @@ void SetBoundaryConditions(double* field)
 
 void StartSimulation()
 {
+    //TODO no standard exception handling
+    feenableexcept(FE_DIVBYZERO | FE_INVALID);
+
     // Calculate memory size
     size_t size = Mx * My * Mz * sizeof(double);
 
