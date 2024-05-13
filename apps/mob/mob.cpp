@@ -5,6 +5,7 @@
 #include <fstream>
 #include <iostream>
 #include <numbers>
+#include <filesystem>
 #include <sstream>
 #include <cfenv>
 //#include <omp.h>
@@ -47,14 +48,20 @@ const double Tm       = 1.0;     // Equilibrium temperature [K]
 // Misc parameters
 const double Radius  = 25*dx;    // Initial radius of spherical grain
 
+namespace fs = std::filesystem;
+
 void WriteToFile(const int tStep, double* field, std::string name)
 {
-    {
-    std::stringstream filename;
-    filename << "Out_" << name << "_"<< tStep << ".vtk";
-    std::string FileName = filename.str();
+    // Create output directory
+    fs::path output_dir = "output";
+    if (!fs::exists(output_dir)) fs::create_directory(output_dir);
 
-    std::ofstream vtk_file(FileName.c_str());
+    // Create filename
+    std::string filename = name + "_" + std::to_string(tStep) + ".vtk";
+    fs::path file_path = output_dir / filename;
+
+    // Write to VTK file
+    std::ofstream vtk_file(file_path);
     vtk_file << "# vtk DataFile Version 3.0\n";
     vtk_file << name << " \n";
     vtk_file << "ASCII\n";
@@ -81,7 +88,6 @@ void WriteToFile(const int tStep, double* field, std::string name)
         vtk_file << field[locIndex] << "\n";
     }
     vtk_file.close();
-    }
 }
 
 int Index(int i, int j, int k)
@@ -105,9 +111,8 @@ void InitializeSupercooledSphere(double* Phi, double* PhiDot, double* Temp,
     {
         int locIndex = Index(i,j,k);
         // Initialize the phase Field
-        //double r = std::sqrt(std::pow(i*dx-x0,2) + std::pow(j*dy-y0,2) + std::pow(k*dz-z0,2));
-        //if ( r < Radius)
-        if ( i*dx < x0 )
+        double r = std::sqrt(std::pow(i*dx-x0,2) + std::pow(j*dy-y0,2) + std::pow(k*dz-z0,2));
+        if ( r < Radius)
         {
             Phi    [locIndex] = 1.0;
             Temp   [locIndex] = Tm;
