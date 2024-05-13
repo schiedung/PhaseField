@@ -13,4 +13,4 @@ $(PROG):$(MAIN) Makefile
 	$(CC) $(CFLAGS) $(INCLUDE) -o $(PROG) $(MAIN) $(LIBS)
 
 clean:
-	rm -f *.bak *.o *.vtk $(PROG)
+	rm -f *.bak *.o *output $(PROG)
