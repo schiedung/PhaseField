@@ -5,11 +5,9 @@ This is a small program for texting new mobility rescaling
 ## Theory
 
 ### Helmholtz Energy Functional
-$$F[\phi] = \int_\Omega f(\phi, \nabla \phi) d\Omega$$
-
-$$\frac{\delta F}{\delta \phi} = -\frac{\pi^2}{8\eta}M_{\phi}\left(\frac{\partial f}{\partial \phi} - \nabla \cdot \frac{\partial f}{\partial \nabla \phi}\right)$$
-
-$$f(\phi, \nabla \phi) = \sigma \left(-\frac{4\eta}{\pi^2}\nabla \phi \cdot \nabla \phi + \frac{4}{\eta} \left\vert \phi\left(1 - \phi\right)\right\vert\right)$$
+$$  F[\phi] = \int_\Omega f(\phi, \nabla \phi) d\Omega  $$
+$$  \frac{\delta F}{\delta \phi} = -\frac{\pi^2}{8\eta}M_{\phi}\left(\frac{\partial f}{\partial \phi} - \nabla \cdot \frac{\partial f}{\partial \nabla \phi}\right  )  $$
+$$   f(\phi, \nabla \phi) = \sigma \left(-\frac{4\eta}{\pi^2}\nabla \phi \cdot \nabla \phi + \frac{4}{\eta} \left\vert \phi\left(1 - \phi\right)\right\vert\right)  $$
 
 ### Normalization
 

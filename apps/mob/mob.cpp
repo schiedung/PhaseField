@@ -17,6 +17,7 @@
 const int Nx = 64;  // Domain size in x-direction
 const int Ny = 64;  // Domain size in y-direction
 const int Nz = 1;   // Domain size in z-direction
+const int dim = (Nx > 1) + (Ny > 1) + (Nz > 1);
 
 // Define memory size
 const int Mx = Nx + 2 * BCELLS;  // Memory size in x-direction
@@ -29,24 +30,30 @@ const int tOut   = 100;  // Output distance in time steps
 bool WriteToDisk = true;
 
 // Define grid spacing
-const double dx = 0.03;   // Grid spacing in x-direction [m]
-const double dy = 0.03;   // Grid spacing in y-direction [m]
-const double dz = 0.03;   // Grid spacing in z-direction [m]
-const double dt = 1.0e-4; // Size of time step [s]
+const double dx = 1.0e-6; // Grid spacing in x-direction [m]
+const double dy = 1.0e-6; // Grid spacing in y-direction [m]
+const double dz = 1.0e-6; // Grid spacing in z-direction [m]
 
-const double Mobility = dx*dx/dt/5;     // Mobility coefficient
 const double sigma    = 1.0;     // Interface energy coefficient
 const double ieta     = 5.0;     // Interface thickness [1]
 const double eta      = ieta*dx; // Interface thickness [m]
-const double rho      = 1.0;     // Density [kg/m^3]
+
+const double alpha    = 1.0;     // Thermal diffusivity [m^2/s]
+const double rho      = 10.0;     // Density [kg/m^3]
 const double L        = 1.0;     // Latent heat [J/kg]
 const double cp       = 1.0;     // Specific heat [J/kgK]
 const double cv       = rho*cp;  // volumetric heat capacity [J/m^3K]
-const double T0       = 1.0;     // Initial temperature [K]
-const double Tm       = 1.0;     // Equilibrium temperature [K]
+const double T0       = -1.0;     // Initial temperature [K]
+const double Tm       =  0.0;     // Equilibrium temperature [K]
+
+const double pi = std::numbers::pi;
+const double M0 = 4.0*pi*pi/(pi*pi-4.0)*alpha/cp/eta/L*cp;
+const double dt_phase   = (dim > 1) ? ((dim > 2) ? (dx*dx/M0/6.0) : (dx*dx/M0/4.0)   ) : (dx*dx/M0/2.0);
+const double dt_thermal = (dim > 1) ? ((dim > 2) ? (dx*dx/M0/6.0) : (dx*dx/alpha/4.0)) : (dx*dx/M0/2.0);
+const double dt = std::min(dt_phase, dt_thermal); // Size of time step [s]
 
 // Misc parameters
-const double Radius  = 25*dx;    // Initial radius of spherical grain
+const double Radius  = 15*dx;    // Initial radius of spherical grain
 
 namespace fs = std::filesystem;
 
@@ -120,7 +127,7 @@ void InitializeSupercooledSphere(double* Phi, double* PhiDot, double* Temp,
         else
         {
             Phi    [locIndex] = 0.0;
-            Temp   [locIndex] = Tm;
+            Temp   [locIndex] = T0;
         }
 
         PhiDot [locIndex] = 0.0;
@@ -166,12 +173,13 @@ void CalcTimeStep(double* Phi, double* PhiDot, double* Temp, double* TempDot)
         const double dg        = cv*(Temp[locIndex] - Tm);
         const double locPhi    = Phi[locIndex];
         double locPhiDot = 0.0;
-        locPhiDot += Mobility*sigma*Laplace(Phi,i,j,k);
-        locPhiDot -= Mobility*sigma*pi*pi/eta/eta/2.0*(0.5-locPhi);
+        locPhiDot += sigma*Laplace(Phi,i,j,k);
+        locPhiDot -= sigma*pi*pi/eta/eta/2.0*(0.5-locPhi);
         locPhiDot -= pi/eta*std::sqrt(locPhi*(1.0-locPhi))*dg;
+        locPhiDot *= M0;
 
         PhiDot [locIndex] += locPhiDot;
-        TempDot[locIndex] += Laplace(Temp,i,j,k) + L/cp * locPhiDot;
+        TempDot[locIndex] += alpha*Laplace(Temp,i,j,k) + L/cp * locPhiDot;
     }
 }
 
@@ -257,6 +265,10 @@ void StartSimulation()
 
     // Start run time measurement
     auto start = std::chrono::high_resolution_clock::now();
+
+    std::cout << "Start Simulation\n";
+    std::cout << "max dt phase:   " << dt_phase   << "\n";
+    std::cout << "max dt thermal: " << dt_thermal << "\n";
 
     // Start time loop
     for (int tStep = 0; tStep <= Nt; tStep++)
