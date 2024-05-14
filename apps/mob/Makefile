@@ -3,7 +3,7 @@ MAIN = mob.cpp
 
 CC      = g++    # Use the g++ Compiler
 LIBS    = -lm  -fopenmp  # Link the math library
-CFLAGS  = -O0 -g -Wall -std=c++20
+CFLAGS  = -O3 -g -Wall -std=c++20
 INCLUDE = -I../../include
 
 
