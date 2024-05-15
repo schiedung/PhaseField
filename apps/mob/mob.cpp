@@ -26,30 +26,28 @@ const int Mz = Nz + 2 * BCELLS;  // Memory size in z-direction
 
 // Define number of time steps
 const int Nt     = 4000; // Number of time steps
-const int tOut   = 100;  // Output distance in time steps
+const int tOut   = 10;   // Output distance in time steps
 bool WriteToDisk = true;
 
 // Define grid spacing
-const double dx = 1.0e-6; // Grid spacing in x-direction [m]
-const double dy = 1.0e-6; // Grid spacing in y-direction [m]
-const double dz = 1.0e-6; // Grid spacing in z-direction [m]
+const double dx = 1.0; // Grid spacing in x-direction [m]
+const double dy = 1.0; // Grid spacing in y-direction [m]
+const double dz = 1.0; // Grid spacing in z-direction [m]
 
 const double sigma    = 1.0;     // Interface energy coefficient
 const double ieta     = 5.0;     // Interface thickness [1]
 const double eta      = ieta*dx; // Interface thickness [m]
 
-const double alpha    = 1.0;     // Thermal diffusivity [m^2/s]
-const double rho      = 10.0;     // Density [kg/m^3]
-const double L        = 1.0;     // Latent heat [J/kg]
-const double cp       = 1.0;     // Specific heat [J/kgK]
-const double cv       = rho*cp;  // volumetric heat capacity [J/m^3K]
-const double T0       = -1.0;     // Initial temperature [K]
+const double alpha    =  1.0;     // Thermal diffusivity [m^2/s]
+const double rho      =  1.0;     // Density [kg/m^3]
+const double L        =  1.0;     // Latent heat [J/kg]
+const double T0       = -1.0;     // Initial undercooling [K]
 const double Tm       =  0.0;     // Equilibrium temperature [K]
 
 const double pi = std::numbers::pi;
-const double M0 = 4.0*pi*pi/(pi*pi-4.0)*alpha/cp/eta/L*cp;
-const double dt_phase   = (dim > 1) ? ((dim > 2) ? (dx*dx/M0/6.0) : (dx*dx/M0/4.0)   ) : (dx*dx/M0/2.0);
-const double dt_thermal = (dim > 1) ? ((dim > 2) ? (dx*dx/M0/6.0) : (dx*dx/alpha/4.0)) : (dx*dx/M0/2.0);
+const double M0 = 4.0*pi*pi/(pi*pi-4.0)*alpha/L/rho/eta;
+const double dt_phase   = (dim > 1) ? ((dim > 2) ? (dx*dx/M0*sigma/6.0) : (dx*dx/M0*sigma/4.0)) : (dx*dx/M0*sigma/2.0);
+const double dt_thermal = (dim > 1) ? ((dim > 2) ? (dx*dx/alpha/6.0)    : (dx*dx/alpha/4.0))    : (dx*dx/alpha/2.0);
 const double dt = std::min(dt_phase, dt_thermal); // Size of time step [s]
 
 // Misc parameters
@@ -118,11 +116,12 @@ void InitializeSupercooledSphere(double* Phi, double* PhiDot, double* Temp,
     {
         int locIndex = Index(i,j,k);
         // Initialize the phase Field
-        double r = std::sqrt(std::pow(i*dx-x0,2) + std::pow(j*dy-y0,2) + std::pow(k*dz-z0,2));
-        if ( r < Radius)
+        //double r = std::sqrt(std::pow(i*dx-x0,2) + std::pow(j*dy-y0,2) + std::pow(k*dz-z0,2));
+        //if ( r < Radius)
+        if ( i*dx < x0)
         {
             Phi    [locIndex] = 1.0;
-            Temp   [locIndex] = Tm;
+            Temp   [locIndex] = 0.0;
         }
         else
         {
@@ -170,7 +169,7 @@ void CalcTimeStep(double* Phi, double* PhiDot, double* Temp, double* TempDot)
     {
         const int    locIndex  = Index(i,j,k);
         const double pi        = std::numbers::pi;
-        const double dg        = cv*(Temp[locIndex] - Tm);
+        const double dg        = L*rho*Temp[locIndex];
         const double locPhi    = Phi[locIndex];
         double locPhiDot = 0.0;
         locPhiDot += sigma*Laplace(Phi,i,j,k);
@@ -179,7 +178,7 @@ void CalcTimeStep(double* Phi, double* PhiDot, double* Temp, double* TempDot)
         locPhiDot *= M0;
 
         PhiDot [locIndex] += locPhiDot;
-        TempDot[locIndex] += alpha*Laplace(Temp,i,j,k) + L/cp * locPhiDot;
+        TempDot[locIndex] += alpha*Laplace(Temp,i,j,k) + locPhiDot; //TODO: account for limited phase field
     }
 }
 
@@ -254,14 +253,16 @@ void StartSimulation()
     size_t size = Mx * My * Mz * sizeof(double);
 
     // Define and allocate host memory
-    double* Phi     = (double *)malloc(size);  std::memset(Phi,     0, size);
-    double* PhiDot  = (double *)malloc(size);  std::memset(PhiDot,  0, size);
-    double* Temp    = (double *)malloc(size);  std::memset(Temp,    0, size);
-    double* TempDot = (double *)malloc(size);  std::memset(TempDot, 0, size);
+    double* Phi     = new double [size];
+    double* PhiDot  = new double [size];
+    double* Temp    = new double [size];
+    double* TempDot = new double [size];
 
     // Initialize Fields
     std::cout << "Initialized Data: " << Nx << "x" << Ny << "x" << Nz << "\n";
     InitializeSupercooledSphere(Phi, PhiDot, Temp, PhiDot);
+    SetBoundaryConditions(Phi);
+    SetBoundaryConditions(Temp);
 
     // Start run time measurement
     auto start = std::chrono::high_resolution_clock::now();
@@ -298,10 +299,10 @@ void StartSimulation()
     std::cout << "Calculation time for " << Nt << " time step: " << duration.count() << " s\n" ;
 
     // Cleanup
-    free(Phi);
-    free(PhiDot);
-    free(Temp);
-    free(TempDot);
+    delete[] Phi;
+    delete[] PhiDot;
+    delete[] Temp;
+    delete[] TempDot;
 }
 
 int main()
