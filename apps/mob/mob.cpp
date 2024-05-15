@@ -55,6 +55,12 @@ const double Radius  = 15*dx;    // Initial radius of spherical grain
 
 namespace fs = std::filesystem;
 
+int Index(int i, int j, int k)
+{
+    // Define index of the memory
+    return (k * My + j) * Mx + i;
+}
+
 void WriteToFile(const int tStep, double* field, std::string name)
 {
     // Create output directory
@@ -89,17 +95,12 @@ void WriteToFile(const int tStep, double* field, std::string name)
     for (int j = BCELLS; j < Ny + BCELLS; ++j)
     for (int i = BCELLS; i < Nx + BCELLS; ++i)
     {
-        int locIndex = (k * My + j) * Mx + i;
-        vtk_file << field[locIndex] << "\n";
+        vtk_file << field[Index(i,j,k)] << "\n";
     }
     vtk_file.close();
 }
 
-int Index(int i, int j, int k)
-{
-    // Define index of the memory
-    return (k * My + j) * Mx + i;
-}
+
 
 void InitializeSupercooledSphere(double* Phi, double* PhiDot, double* Temp,
         double* TempDot)
@@ -151,10 +152,10 @@ double Laplace(double* field, int i, int j, int k)
     df2_dy2 += field[Index(i,j-1,k)];
     df2_dy2 /= dy*dy;
 
-    //df2_dz2 += field[Index(i,j,k+1)];
-    //df2_dz2 -= field[Index(i,j,k  )] * 2.0;
-    //df2_dz2 += field[Index(i,j,k-1)];
-    //df2_dz2 /= dz*dz;
+    df2_dz2 += field[Index(i,j,k+1)];
+    df2_dz2 -= field[Index(i,j,k  )] * 2.0;
+    df2_dz2 += field[Index(i,j,k-1)];
+    df2_dz2 /= dz*dz;
 
     return df2_dx2 + df2_dy2 + df2_dz2;
 }
@@ -209,8 +210,8 @@ void SetBoundariesX(double* field)
     for (int j = 0; j < My; j++)
     for (int k = 0; k < Mz; k++)
     {
-        field[Index(0 ,j,k)] = field[Index(1   ,j,k)];
-        field[Index(Nx,j,k)] = field[Index(Nx-1,j,k)];
+        field[Index(0   ,j,k)] = field[Index(1   ,j,k)];
+        field[Index(Mx-1,j,k)] = field[Index(Mx-2,j,k)];
     }
 }
 
@@ -220,8 +221,8 @@ void SetBoundariesY(double* field)
     for (int i = 0; i < Mx; i++)
     for (int k = 0; k < Mz; k++)
     {
-        field[Index(i,0 ,k)] = field[Index(i,1   ,k)];
-        field[Index(i,Ny,k)] = field[Index(i,Ny-1,k)];
+        field[Index(i,0   ,k)] = field[Index(i,1   ,k)];
+        field[Index(i,My-1,k)] = field[Index(i,My-2,k)];
     }
 }
 
@@ -231,17 +232,17 @@ void SetBoundariesZ(double* field)
     for (int i = 0; i < Mx; i++)
     for (int j = 0; j < My; j++)
     {
-        field[Index(i,j,0 )] = field[Index(i,j,1   )];
-        field[Index(i,j,Nz)] = field[Index(i,j,Nz-1)];
+        field[Index(i,j,0   )] = field[Index(i,j,1   )];
+        field[Index(i,j,Mz-1)] = field[Index(i,j,Mz-2)];
     }
 }
 
 void SetBoundaryConditions(double* field)
 {
     // Set Boundary conditions
-    if (Nx > 0) SetBoundariesX(field);
-    if (Ny > 0) SetBoundariesY(field);
-    if (Nz > 0) SetBoundariesZ(field);
+    SetBoundariesX(field);
+    SetBoundariesY(field);
+    SetBoundariesZ(field);
 }
 
 void StartSimulation()
