@@ -14,8 +14,8 @@
 #define BCELLS 1
 
 // Define computation domain size
-const int Nx = 64;  // Domain size in x-direction
-const int Ny = 64;  // Domain size in y-direction
+const int Nx = 256;  // Domain size in x-direction
+const int Ny = 256;  // Domain size in y-direction
 const int Nz = 1;   // Domain size in z-direction
 const int dim = (Nx > 1) + (Ny > 1) + (Nz > 1);
 
@@ -48,7 +48,7 @@ const double pi = std::numbers::pi;
 const double M0 = 4.0*pi*pi/(pi*pi-4.0)*alpha/L/rho/eta;
 const double dt_phase   = (dim > 1) ? ((dim > 2) ? (dx*dx/M0*sigma/6.0) : (dx*dx/M0*sigma/4.0)) : (dx*dx/M0*sigma/2.0);
 const double dt_thermal = (dim > 1) ? ((dim > 2) ? (dx*dx/alpha/6.0)    : (dx*dx/alpha/4.0))    : (dx*dx/alpha/2.0);
-const double dt = std::min(dt_phase, dt_thermal); // Size of time step [s]
+const double dt = 0.9*std::min(dt_phase, dt_thermal); // Size of time step [s]
 
 // Misc parameters
 const double Radius  = 15*dx;    // Initial radius of spherical grain
@@ -117,9 +117,9 @@ void InitializeSupercooledSphere(double* Phi, double* PhiDot, double* Temp,
     {
         int locIndex = Index(i,j,k);
         // Initialize the phase Field
-        //double r = std::sqrt(std::pow(i*dx-x0,2) + std::pow(j*dy-y0,2) + std::pow(k*dz-z0,2));
-        //if ( r < Radius)
-        if ( i*dx < x0)
+        double r = std::sqrt(std::pow(i*dx-x0,2) + std::pow(j*dy-y0,2) + std::pow(k*dz-z0,2));
+        if ( r < Radius)
+        //if ( i*dx < x0)
         {
             Phi    [locIndex] = 1.0;
             Temp   [locIndex] = 0.0;
@@ -160,47 +160,39 @@ double Laplace(double* field, int i, int j, int k)
     return df2_dx2 + df2_dy2 + df2_dz2;
 }
 
-void CalcTimeStep(double* Phi, double* PhiDot, double* Temp, double* TempDot)
+void CalcTimeStep(double* phiOld, double* phiNew, double* uOld, double* uNew)
 {
-    // Calculate PhiDot and TempDot
     #pragma omp parallel for schedule(auto) collapse(2)
     for (int i = BCELLS; i < Nx + BCELLS; i++)
     for (int j = BCELLS; j < Ny + BCELLS; j++)
     for (int k = BCELLS; k < Nz + BCELLS; k++)
     {
+        // Update phase field
         const int    locIndex  = Index(i,j,k);
         const double pi        = std::numbers::pi;
-        const double dg        = L*rho*Temp[locIndex];
-        const double locPhi    = Phi[locIndex];
-        double locPhiDot = 0.0;
-        locPhiDot += sigma*Laplace(Phi,i,j,k);
-        locPhiDot -= sigma*pi*pi/eta/eta/2.0*(0.5-locPhi);
-        locPhiDot -= pi/eta*std::sqrt(locPhi*(1.0-locPhi))*dg;
-        locPhiDot *= M0;
+        const double dg        = L*rho*uOld[locIndex];
+        const double phi       = phiOld[locIndex];
+        phiNew[locIndex]  = phiOld[locIndex];
+        phiNew[locIndex] += dt*M0*sigma*Laplace(phiOld,i,j,k);
+        phiNew[locIndex] -= dt*M0*sigma*pi*pi/eta/eta/2.0*(0.5-phi);
+        phiNew[locIndex] -= dt*M0*pi/eta*std::sqrt(phi*(1.0-phi))*dg;
 
-        PhiDot [locIndex] += locPhiDot;
-        TempDot[locIndex] += alpha*Laplace(Temp,i,j,k) + locPhiDot; //TODO: account for limited phase field
+        // Limit phase-field values to [0,1]
+        if      (phiNew[locIndex] < 0.0) phiNew[locIndex] = 0.0;
+        else if (phiNew[locIndex] > 1.0) phiNew[locIndex] = 1.0;
+
+        // Update temperature field
+        uNew[locIndex] = uOld[locIndex] + dt*alpha*Laplace(uOld,i,j,k) + phiNew[locIndex]-phiOld[locIndex];
     }
-}
 
-void ApplyTimeStep(double* Phi, double* PhiDot, double* Temp, double* TempDot)
-{
     #pragma omp parallel for schedule(auto) collapse(2)
     for (int i = BCELLS; i < Nx + BCELLS; i++)
     for (int j = BCELLS; j < Ny + BCELLS; j++)
     for (int k = BCELLS; k < Nz + BCELLS; k++)
     {
-        int locIndex = Index(i,j,k);
-
-        // Update phase field
-        Phi    [locIndex] += dt * PhiDot [locIndex];
-        PhiDot [locIndex]  = 0.0;
-        Temp   [locIndex] += dt * TempDot[locIndex];
-        TempDot[locIndex]  = 0.0;
-
-        // Limit phase-field values to [0,1]
-        if      (Phi[locIndex] < 0.0) Phi[locIndex] = 0.0;
-        else if (Phi[locIndex] > 1.0) Phi[locIndex] = 1.0;
+        const int locIndex = Index(i,j,k);
+        phiOld[locIndex] = phiNew[locIndex];
+        uOld  [locIndex] = uNew  [locIndex];
     }
 }
 
@@ -297,12 +289,9 @@ void StartSimulation()
             }
         }
 
+        CalcTimeStep(Phi, PhiDot, Temp, TempDot);
         SetBoundaryConditions(Phi);
         SetBoundaryConditions(Temp);
-
-        // Calculate and apply time step
-        CalcTimeStep(Phi,  PhiDot, Temp, TempDot);
-        ApplyTimeStep(Phi, PhiDot, Temp, TempDot);
     }
 
     // Stop run time measurement
