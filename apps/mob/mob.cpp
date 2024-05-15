@@ -25,7 +25,7 @@ const int My = Ny + 2 * BCELLS;  // Memory size in y-direction
 const int Mz = Nz + 2 * BCELLS;  // Memory size in z-direction
 
 // Define number of time steps
-const int Nt     = 4000; // Number of time steps
+const int Nt     = 400; // Number of time steps
 const int tOut   = 10;   // Output distance in time steps
 bool WriteToDisk = true;
 
@@ -245,6 +245,17 @@ void SetBoundaryConditions(double* field)
     SetBoundariesZ(field);
 }
 
+std::string ctime() {
+    auto now = std::chrono::system_clock::now();
+    std::time_t now_c = std::chrono::system_clock::to_time_t(now);
+    std::tm* timeinfo = std::localtime(&now_c);
+
+    // Format the time string
+    std::ostringstream oss;
+    oss << std::put_time(timeinfo, "%Y-%m-%d-%H:%M:%S: ");
+    return oss.str();
+}
+
 void StartSimulation()
 {
     //TODO no standard exception handling
@@ -260,7 +271,7 @@ void StartSimulation()
     double* TempDot = new double [size];
 
     // Initialize Fields
-    std::cout << "Initialized Data: " << Nx << "x" << Ny << "x" << Nz << "\n";
+    std::cout << ctime() << "Initialize Fields\n";
     InitializeSupercooledSphere(Phi, PhiDot, Temp, PhiDot);
     SetBoundaryConditions(Phi);
     SetBoundaryConditions(Temp);
@@ -268,9 +279,9 @@ void StartSimulation()
     // Start run time measurement
     auto start = std::chrono::high_resolution_clock::now();
 
-    std::cout << "Start Simulation\n";
-    std::cout << "max dt phase:   " << dt_phase   << "\n";
-    std::cout << "max dt thermal: " << dt_thermal << "\n";
+    std::cout << ctime() << "Start Simulation "
+                         << "(max dt phase: "   << dt_phase   << ","
+                         << " max dt thermal: " << dt_thermal << ")\n";
 
     // Start time loop
     for (int tStep = 0; tStep <= Nt; tStep++)
@@ -278,7 +289,7 @@ void StartSimulation()
         // Make Output if necessary
         if(tStep%tOut == 0)
         {
-            std::cout << "Time step: " << tStep << "/" << Nt << "\n";
+            std::cout << ctime() << "Write Output: " << tStep << "/" << Nt << "\n";
             if (WriteToDisk)
             {
                 WriteToFile(tStep, Phi,  "Phase-Field");
@@ -297,7 +308,7 @@ void StartSimulation()
     // Stop run time measurement
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> duration = end - start;
-    std::cout << "Calculation time for " << Nt << " time step: " << duration.count() << " s\n" ;
+    std::cout << ctime() << "Finished Simulation (Duration " << duration.count() << " s)\n" ;
 
     // Cleanup
     delete[] Phi;
