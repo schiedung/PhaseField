@@ -14,7 +14,7 @@
 #define BCELLS 1
 
 // Define computation domain size
-const int Nx = 512;  // Domain size in x-direction
+const int Nx = 256;  // Domain size in x-direction
 const int Ny = 512;  // Domain size in y-direction
 const int Nz = 1;   // Domain size in z-direction
 const int dim = (Nx > 1) + (Ny > 1) + (Nz > 1);
@@ -31,13 +31,14 @@ const double dz = 1.0; // Grid spacing in z-direction [m]
 
 const double sigma0  = 1.0;   // Interface energy coefficient [J/m^2]
 const double epsilon = 0.5;   // Interface energy ansitropy coefficient [1]
+const double theta = std::numbers::pi/4.0;// Interface energy ansitropy angle [rad]
 const double ieta  = 5.0;     // Interface thickness [1]
 const double eta   = ieta*dx; // Interface thickness [m]
 
 const double alpha =  1.0;     // Thermal diffusivity [m^2/s]
 const double rho   =  1.0;     // Density [kg/m^3]
 const double L     =  1.0;     // Latent heat [J/kg]
-const double T0    = -1.0;     // Initial undercooling [K]
+const double T0    = -0.75;    // Initial undercooling [K]
 const double Tm    =  0.0;     // Equilibrium temperature [K]
 
 const double pi = std::numbers::pi;
@@ -47,9 +48,9 @@ const double dt_thermal = (dim > 1) ? ((dim > 2) ? (dx*dx/alpha/6.0)     : (dx*d
 const double dt = 0.5*std::min(dt_phase, dt_thermal); // Size of time step [s]
 
 // Define number of time steps
-const double simTime = 100.0;// Total simulation time [s]
+const double simTime = 2000.0;// Total simulation time [s]
 const int Nt     = simTime/dt; // Number of time steps
-const int tOut   = 100;   // Output distance in time steps
+const int tOut   = 1000;   // Output distance in time steps
 bool WriteToDisk = true;
 
 
@@ -108,8 +109,8 @@ void InitializeSupercooledSphere(double* Phi, double* PhiDot, double* Temp,
 {
     // Initialization
     const double x0 = Nx/2 * dx;
-    const double y0 = Ny/2 * dy;
-    const double z0 = Nz/2 * dz;
+    const double y0 = 0.0;//Ny/2 * dy;
+    const double z0 = 0.0;//Nz/2 * dz;
 
     #pragma omp parallel for schedule(auto) collapse(2)
     for (int i = BCELLS; i < Nx + BCELLS; i++)
@@ -174,10 +175,13 @@ double interfaceEnergy(double* phi, int i, int j, int k)
     double nx = dphix/normDPhi;
     double ny = dphiy/normDPhi;
     double nz = dphiz/normDPhi;
-    double nx4 = nx*nx*nx*nx;
-    double ny4 = ny*ny*ny*ny;
-    double nz4 = nz*nz*nz*nz;
-    return sigma0*(1.0+epsilon*(nx4+ny4+nz4));
+    double rnx = std::cos(theta)*nx - std::sin(theta)*ny;
+    double rny = std::sin(theta)*nx + std::cos(theta)*ny;
+    double rnz = nz;
+    double rnx4 = rnx*rnx*rnx*rnx;
+    double rny4 = rny*rny*rny*rny;
+    double rnz4 = rnz*rnz*rnz*rnz;
+    return sigma0*(1.0+epsilon*(rnx4+rny4+rnz4));
 }
 
 void CalcTimeStep(double* phiOld, double* phiNew, double* uOld, double* uNew)
