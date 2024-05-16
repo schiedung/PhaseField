@@ -170,8 +170,8 @@ void CalcTimeStep(double* phiOld, double* phiNew, double* uOld, double* uNew)
         const int    locIndex   = Index(i,j,k);
         const double laplacePhi = Laplace(phiOld,i,j,k);
 
-        // Update temperature field
-        uNew[locIndex] = uOld[locIndex] + dt*alpha*Laplace(uOld,i,j,k);
+        uNew  [locIndex] = uOld  [locIndex] + dt*alpha*Laplace(uOld,i,j,k);
+        phiNew[locIndex] = phiOld[locIndex];
 
         if (laplacePhi != 0.0)
         {
@@ -179,7 +179,6 @@ void CalcTimeStep(double* phiOld, double* phiNew, double* uOld, double* uNew)
             const double pi  = std::numbers::pi;
             const double dg  = L*rho*uOld[locIndex];
             const double phi = phiOld[locIndex];
-            phiNew[locIndex]  = phiOld[locIndex];
             phiNew[locIndex] += dt*M0*sigma*laplacePhi;
             phiNew[locIndex] -= dt*M0*sigma*pi*pi/eta/eta/2.0*(0.5-phi);
             phiNew[locIndex] -= dt*M0*pi/eta*std::sqrt(phi*(1.0-phi))*dg;
