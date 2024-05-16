@@ -22,6 +22,7 @@ $$ f(\phi) = \frac{8}{\eta}\phi(1-\phi) $$
 $$ F\left[\phi\right] = \sigma \int_{-\eta/2}^{\eta/2} \frac{8}{\eta}\phi(1-\phi) dx = \sigma $$
 
 ### Temporal evolution
-$$\frac{\partial f}{\partial \phi} = -\sigma \frac{4}{\eta} \left(1 - 2\phi\right)$$
-$$\frac{\partial f}{\partial \nabla \phi} = \sigma \frac{8\eta}{\pi^2} \Delta \phi$$
-$$\dot{\phi} = M_{\phi}\sigma\left( \Delta \phi - \frac{\pi^2}{2\eta^2} \left(\frac{1}{2} - \phi\right)\right)$$
+$$ \frac{\partial f}{\partial \phi} = -\sigma \frac{4}{\eta} \left(1 - 2\phi\right)  $$
+$$ \frac{\partial f}{\partial \nabla \phi} = \sigma \frac{8\eta}{\pi^2} \Delta \phi  $$
+$$ \dot{\phi} = M_{\phi}\left[\sigma\left( \Delta \phi - \frac{\pi^2}{2\eta^2} \left(\frac{1}{2} - \phi\right)\right) -\frac{\pi^2}{8\eta}\frac{\partial f}{\partial \phi}\right]  $$
+$$ \dot{\phi} = M_{\phi}\left[\sigma\left( \Delta \phi - \frac{\pi^2}{2\eta^2} \left(\frac{1}{2} - \phi\right)\right) -\frac{\pi}{\eta}\sqrt{\phi(1-\phi)}\Delta{g}\right]  $$
