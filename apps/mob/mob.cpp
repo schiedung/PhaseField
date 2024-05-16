@@ -16,7 +16,7 @@
 // Define computation domain size
 const int Nx = 256;  // Domain size in x-direction
 const int Ny = 256;  // Domain size in y-direction
-const int Nz = 1;   // Domain size in z-direction
+const int Nz = 256;   // Domain size in z-direction
 const int dim = (Nx > 1) + (Ny > 1) + (Nz > 1);
 
 // Define memory size
@@ -27,22 +27,22 @@ const int Mz = Nz + 2 * BCELLS;  // Memory size in z-direction
 // Define number of time steps
 const int Nt     = 400; // Number of time steps
 const int tOut   = 10;   // Output distance in time steps
-bool WriteToDisk = true;
+bool WriteToDisk = false;
 
 // Define grid spacing
 const double dx = 1.0; // Grid spacing in x-direction [m]
 const double dy = 1.0; // Grid spacing in y-direction [m]
 const double dz = 1.0; // Grid spacing in z-direction [m]
 
-const double sigma    = 1.0;     // Interface energy coefficient
-const double ieta     = 5.0;     // Interface thickness [1]
-const double eta      = ieta*dx; // Interface thickness [m]
+const double sigma = 1.0;     // Interface energy coefficient
+const double ieta  = 5.0;     // Interface thickness [1]
+const double eta   = ieta*dx; // Interface thickness [m]
 
-const double alpha    =  1.0;     // Thermal diffusivity [m^2/s]
-const double rho      =  1.0;     // Density [kg/m^3]
-const double L        =  1.0;     // Latent heat [J/kg]
-const double T0       = -1.0;     // Initial undercooling [K]
-const double Tm       =  0.0;     // Equilibrium temperature [K]
+const double alpha =  1.0;     // Thermal diffusivity [m^2/s]
+const double rho   =  1.0;     // Density [kg/m^3]
+const double L     =  1.0;     // Latent heat [J/kg]
+const double T0    = -1.0;     // Initial undercooling [K]
+const double Tm    =  0.0;     // Equilibrium temperature [K]
 
 const double pi = std::numbers::pi;
 const double M0 = 4.0*pi*pi/(pi*pi-4.0)*alpha/L/rho/eta;
@@ -99,8 +99,6 @@ void WriteToFile(const int tStep, double* field, std::string name)
     }
     vtk_file.close();
 }
-
-
 
 void InitializeSupercooledSphere(double* Phi, double* PhiDot, double* Temp,
         double* TempDot)
@@ -160,6 +158,8 @@ double Laplace(double* field, int i, int j, int k)
     return df2_dx2 + df2_dy2 + df2_dz2;
 }
 
+
+
 void CalcTimeStep(double* phiOld, double* phiNew, double* uOld, double* uNew)
 {
     #pragma omp parallel for schedule(auto) collapse(2)
@@ -167,22 +167,30 @@ void CalcTimeStep(double* phiOld, double* phiNew, double* uOld, double* uNew)
     for (int j = BCELLS; j < Ny + BCELLS; j++)
     for (int k = BCELLS; k < Nz + BCELLS; k++)
     {
-        // Update phase field
-        const int    locIndex  = Index(i,j,k);
-        const double pi        = std::numbers::pi;
-        const double dg        = L*rho*uOld[locIndex];
-        const double phi       = phiOld[locIndex];
-        phiNew[locIndex]  = phiOld[locIndex];
-        phiNew[locIndex] += dt*M0*sigma*Laplace(phiOld,i,j,k);
-        phiNew[locIndex] -= dt*M0*sigma*pi*pi/eta/eta/2.0*(0.5-phi);
-        phiNew[locIndex] -= dt*M0*pi/eta*std::sqrt(phi*(1.0-phi))*dg;
-
-        // Limit phase-field values to [0,1]
-        if      (phiNew[locIndex] < 0.0) phiNew[locIndex] = 0.0;
-        else if (phiNew[locIndex] > 1.0) phiNew[locIndex] = 1.0;
+        const int    locIndex   = Index(i,j,k);
+        const double laplacePhi = Laplace(phiOld,i,j,k);
 
         // Update temperature field
-        uNew[locIndex] = uOld[locIndex] + dt*alpha*Laplace(uOld,i,j,k) + phiNew[locIndex]-phiOld[locIndex];
+        uNew[locIndex] = uOld[locIndex] + dt*alpha*Laplace(uOld,i,j,k);
+
+        if (laplacePhi != 0.0)
+        {
+            // Update phase field
+            const double pi  = std::numbers::pi;
+            const double dg  = L*rho*uOld[locIndex];
+            const double phi = phiOld[locIndex];
+            phiNew[locIndex]  = phiOld[locIndex];
+            phiNew[locIndex] += dt*M0*sigma*laplacePhi;
+            phiNew[locIndex] -= dt*M0*sigma*pi*pi/eta/eta/2.0*(0.5-phi);
+            phiNew[locIndex] -= dt*M0*pi/eta*std::sqrt(phi*(1.0-phi))*dg;
+
+            // Limit phase-field values to [0,1]
+            if      (phiNew[locIndex] < 0.0) phiNew[locIndex] = 0.0;
+            else if (phiNew[locIndex] > 1.0) phiNew[locIndex] = 1.0;
+
+            // Update temperature field
+            uNew[locIndex] += phiNew[locIndex]-phiOld[locIndex];
+        }
     }
 
     #pragma omp parallel for schedule(auto) collapse(2)
