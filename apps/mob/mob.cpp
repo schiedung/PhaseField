@@ -14,8 +14,8 @@
 #define BCELLS 1
 
 // Define computation domain size
-const int Nx = 256;  // Domain size in x-direction
-const int Ny = 512;  // Domain size in y-direction
+const int Nx = 512; // Domain size in x-direction
+const int Ny = 1024;// Domain size in y-direction
 const int Nz = 1;   // Domain size in z-direction
 const int dim = (Nx > 1) + (Ny > 1) + (Nz > 1);
 
@@ -30,25 +30,25 @@ const double dy = 1.0; // Grid spacing in y-direction [m]
 const double dz = 1.0; // Grid spacing in z-direction [m]
 
 const double sigma0  = 1.0;   // Interface energy coefficient [J/m^2]
-const double epsilon = 0.5;   // Interface energy ansitropy coefficient [1]
-const double theta = std::numbers::pi/4.0;// Interface energy ansitropy angle [rad]
+const double epsilon = 0.6;   // Interface energy ansitropy coefficient [1]
+const double theta = 0.0;//std::numbers::pi/4.0;// Interface energy ansitropy angle [rad]
 const double ieta  = 5.0;     // Interface thickness [1]
 const double eta   = ieta*dx; // Interface thickness [m]
 
 const double alpha =  1.0;     // Thermal diffusivity [m^2/s]
 const double rho   =  1.0;     // Density [kg/m^3]
 const double L     =  1.0;     // Latent heat [J/kg]
-const double T0    = -0.75;    // Initial undercooling [K]
+const double T0    = -0.6;    // Initial undercooling [K]
 const double Tm    =  0.0;     // Equilibrium temperature [K]
 
 const double pi = std::numbers::pi;
 const double M0 = 4.0*pi*pi/(pi*pi-4.0)*alpha/L/rho/eta;
 const double dt_phase   = (dim > 1) ? ((dim > 2) ? (dx*dx/M0*sigma0/6.0) : (dx*dx/M0*sigma0/4.0)) : (dx*dx/M0*sigma0/2.0);
 const double dt_thermal = (dim > 1) ? ((dim > 2) ? (dx*dx/alpha/6.0)     : (dx*dx/alpha/4.0))     : (dx*dx/alpha/2.0);
-const double dt = 0.5*std::min(dt_phase, dt_thermal); // Size of time step [s]
+const double dt = 0.75*std::min(dt_phase, dt_thermal); // Size of time step [s]
 
 // Define number of time steps
-const double simTime = 2000.0;// Total simulation time [s]
+const double simTime = 20000.0;// Total simulation time [s]
 const int Nt     = simTime/dt; // Number of time steps
 const int tOut   = 1000;   // Output distance in time steps
 bool WriteToDisk = true;
@@ -104,8 +104,8 @@ void WriteToFile(const int tStep, double* field, std::string name)
     vtk_file.close();
 }
 
-void InitializeSupercooledSphere(double* Phi, double* PhiDot, double* Temp,
-        double* TempDot)
+void InitializeSupercooledSphere(double* phiNew, double* phiOld, double* uNew,
+        double* uOld)
 {
     // Initialization
     const double x0 = Nx/2 * dx;
@@ -122,22 +122,22 @@ void InitializeSupercooledSphere(double* Phi, double* PhiDot, double* Temp,
         double r = std::sqrt(std::pow(i*dx-x0,2) + std::pow(j*dy-y0,2) + std::pow(k*dz-z0,2));
         if ( r < Radius -eta/2.0)
         {
-            Phi    [locIndex] = 1.0;
-            Temp   [locIndex] = 0.0;
+            phiNew [locIndex] = 1.0;
+            uNew   [locIndex] = 0.0;
         }
         else if (r < Radius + eta/2.0)
         {
-            Phi    [locIndex] = 0.5 - 0.5*std::sin(std::numbers::pi*(r-Radius)/eta);
-            Temp   [locIndex] = 0.0;
+            phiNew [locIndex] = 0.5 - 0.5*std::sin(std::numbers::pi*(r-Radius)/eta);
+            uNew   [locIndex] = 0.0;
         }
         else
         {
-            Phi    [locIndex] = 0.0;
-            Temp   [locIndex] = T0;
+            phiNew [locIndex] = 0.0;
+            uNew   [locIndex] = T0;
         }
 
-        PhiDot [locIndex] = 0.0;
-        TempDot[locIndex] = 0.0;
+        phiOld [locIndex] = 0.0;
+        uOld[locIndex] = 0.0;
     }
 }
 
@@ -181,7 +181,8 @@ double interfaceEnergy(double* phi, int i, int j, int k)
     double rnx4 = rnx*rnx*rnx*rnx;
     double rny4 = rny*rny*rny*rny;
     double rnz4 = rnz*rnz*rnz*rnz;
-    return sigma0*(1.0+epsilon*(rnx4+rny4+rnz4));
+    //return sigma0*(1.0+epsilon*(rnx4+rny4+rnz4)); // Cubic Energy
+    return sigma0*(1.0+epsilon*(1.5-2.5*(rnx4+rny4+rnz4))); // Cubic Stiffness
 }
 
 void CalcTimeStep(double* phiOld, double* phiNew, double* uOld, double* uNew)
@@ -288,16 +289,16 @@ void StartSimulation()
     size_t size = Mx * My * Mz * sizeof(double);
 
     // Define and allocate host memory
-    double* Phi     = new double [size];
-    double* PhiDot  = new double [size];
-    double* Temp    = new double [size];
-    double* TempDot = new double [size];
+    double* phiNew  = new double [size];
+    double* phiOld  = new double [size];
+    double* uNew    = new double [size];
+    double* uOld    = new double [size];
 
     // Initialize Fields
     std::cout << ctime() << "Initialize Fields\n";
-    InitializeSupercooledSphere(Phi, PhiDot, Temp, PhiDot);
-    SetBoundaryConditions(Phi);
-    SetBoundaryConditions(Temp);
+    InitializeSupercooledSphere(phiNew, phiOld, uNew, phiOld);
+    SetBoundaryConditions(phiNew);
+    SetBoundaryConditions(uNew);
 
     // Start run time measurement
     auto start = std::chrono::high_resolution_clock::now();
@@ -315,14 +316,14 @@ void StartSimulation()
             std::cout << ctime() << "Write Output: " << tStep << "/" << Nt << "\n";
             if (WriteToDisk)
             {
-                WriteToFile(tStep, Phi,  "Phase-Field");
-                WriteToFile(tStep, Temp, "Temperature");
+                WriteToFile(tStep, phiNew, "Phase-Field");
+                WriteToFile(tStep, uNew,   "Undercooling");
             }
         }
 
-        CalcTimeStep(Phi, PhiDot, Temp, TempDot);
-        SetBoundaryConditions(Phi);
-        SetBoundaryConditions(Temp);
+        CalcTimeStep(phiNew, phiOld, uNew, uOld);
+        SetBoundaryConditions(phiNew);
+        SetBoundaryConditions(uNew);
     }
 
     // Stop run time measurement
@@ -331,10 +332,10 @@ void StartSimulation()
     std::cout << ctime() << "Finished Simulation (Duration " << duration.count() << " s)\n" ;
 
     // Cleanup
-    delete[] Phi;
-    delete[] PhiDot;
-    delete[] Temp;
-    delete[] TempDot;
+    delete[] phiNew;
+    delete[] phiOld;
+    delete[] uNew;
+    delete[] uOld;
 }
 
 int main()
