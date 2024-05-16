@@ -14,9 +14,9 @@
 #define BCELLS 1
 
 // Define computation domain size
-const int Nx = 256;  // Domain size in x-direction
-const int Ny = 256;  // Domain size in y-direction
-const int Nz = 256;   // Domain size in z-direction
+const int Nx = 512;  // Domain size in x-direction
+const int Ny = 512;  // Domain size in y-direction
+const int Nz = 1;   // Domain size in z-direction
 const int dim = (Nx > 1) + (Ny > 1) + (Nz > 1);
 
 // Define memory size
@@ -24,17 +24,13 @@ const int Mx = Nx + 2 * BCELLS;  // Memory size in x-direction
 const int My = Ny + 2 * BCELLS;  // Memory size in y-direction
 const int Mz = Nz + 2 * BCELLS;  // Memory size in z-direction
 
-// Define number of time steps
-const int Nt     = 400; // Number of time steps
-const int tOut   = 10;   // Output distance in time steps
-bool WriteToDisk = false;
-
 // Define grid spacing
 const double dx = 1.0; // Grid spacing in x-direction [m]
 const double dy = 1.0; // Grid spacing in y-direction [m]
 const double dz = 1.0; // Grid spacing in z-direction [m]
 
-const double sigma = 1.0;     // Interface energy coefficient
+const double sigma0  = 1.0;   // Interface energy coefficient [J/m^2]
+const double epsilon = 0.5;   // Interface energy ansitropy coefficient [1]
 const double ieta  = 5.0;     // Interface thickness [1]
 const double eta   = ieta*dx; // Interface thickness [m]
 
@@ -46,9 +42,16 @@ const double Tm    =  0.0;     // Equilibrium temperature [K]
 
 const double pi = std::numbers::pi;
 const double M0 = 4.0*pi*pi/(pi*pi-4.0)*alpha/L/rho/eta;
-const double dt_phase   = (dim > 1) ? ((dim > 2) ? (dx*dx/M0*sigma/6.0) : (dx*dx/M0*sigma/4.0)) : (dx*dx/M0*sigma/2.0);
-const double dt_thermal = (dim > 1) ? ((dim > 2) ? (dx*dx/alpha/6.0)    : (dx*dx/alpha/4.0))    : (dx*dx/alpha/2.0);
-const double dt = 0.9*std::min(dt_phase, dt_thermal); // Size of time step [s]
+const double dt_phase   = (dim > 1) ? ((dim > 2) ? (dx*dx/M0*sigma0/6.0) : (dx*dx/M0*sigma0/4.0)) : (dx*dx/M0*sigma0/2.0);
+const double dt_thermal = (dim > 1) ? ((dim > 2) ? (dx*dx/alpha/6.0)     : (dx*dx/alpha/4.0))     : (dx*dx/alpha/2.0);
+const double dt = 0.5*std::min(dt_phase, dt_thermal); // Size of time step [s]
+
+// Define number of time steps
+const double simTime = 100.0;// Total simulation time [s]
+const int Nt     = simTime/dt; // Number of time steps
+const int tOut   = 100;   // Output distance in time steps
+bool WriteToDisk = true;
+
 
 // Misc parameters
 const double Radius  = 15*dx;    // Initial radius of spherical grain
@@ -116,10 +119,14 @@ void InitializeSupercooledSphere(double* Phi, double* PhiDot, double* Temp,
         int locIndex = Index(i,j,k);
         // Initialize the phase Field
         double r = std::sqrt(std::pow(i*dx-x0,2) + std::pow(j*dy-y0,2) + std::pow(k*dz-z0,2));
-        if ( r < Radius)
-        //if ( i*dx < x0)
+        if ( r < Radius -eta/2.0)
         {
             Phi    [locIndex] = 1.0;
+            Temp   [locIndex] = 0.0;
+        }
+        else if (r < Radius + eta/2.0)
+        {
+            Phi    [locIndex] = 0.5 - 0.5*std::sin(std::numbers::pi*(r-Radius)/eta);
             Temp   [locIndex] = 0.0;
         }
         else
@@ -158,7 +165,20 @@ double Laplace(double* field, int i, int j, int k)
     return df2_dx2 + df2_dy2 + df2_dz2;
 }
 
-
+double interfaceEnergy(double* phi, int i, int j, int k)
+{
+    double dphix = (-1.0/12.0*phi[Index(i+2,j,k)] + 2.0/3.0*phi[Index(i+1,j,k)] - 2.0/3.0*phi[Index(i-1,j,k)] + 1.0/12.0*phi[Index(i-2,j,k)])/dx;
+    double dphiy = (-1.0/12.0*phi[Index(i,j+2,k)] + 2.0/3.0*phi[Index(i,j+1,k)] - 2.0/3.0*phi[Index(i,j-1,k)] + 1.0/12.0*phi[Index(i,j-2,k)])/dy;
+    double dphiz = (-1.0/12.0*phi[Index(i,j,k+2)] + 2.0/3.0*phi[Index(i,j,k+1)] - 2.0/3.0*phi[Index(i,j,k-1)] + 1.0/12.0*phi[Index(i,j,k-2)])/dz;
+    double normDPhi = std::sqrt(dphix*dphix + dphiy*dphiy + dphiz*dphiz);
+    double nx = dphix/normDPhi;
+    double ny = dphiy/normDPhi;
+    double nz = dphiz/normDPhi;
+    double nx4 = nx*nx*nx*nx;
+    double ny4 = ny*ny*ny*ny;
+    double nz4 = nz*nz*nz*nz;
+    return sigma0*(1.0+epsilon*(nx4+ny4+nz4));
+}
 
 void CalcTimeStep(double* phiOld, double* phiNew, double* uOld, double* uNew)
 {
@@ -176,11 +196,11 @@ void CalcTimeStep(double* phiOld, double* phiNew, double* uOld, double* uNew)
         if (laplacePhi != 0.0)
         {
             // Update phase field
-            const double pi  = std::numbers::pi;
-            const double dg  = L*rho*uOld[locIndex];
-            const double phi = phiOld[locIndex];
-            phiNew[locIndex] += dt*M0*sigma*laplacePhi;
-            phiNew[locIndex] -= dt*M0*sigma*pi*pi/eta/eta/2.0*(0.5-phi);
+            const double pi    = std::numbers::pi;
+            const double dg    = L*rho*uOld[locIndex];
+            const double phi   = phiOld[locIndex];
+            const double sigma = interfaceEnergy(phiOld,i,j,k);
+            phiNew[locIndex] += dt*M0*sigma*(laplacePhi -pi*pi/eta/eta/2.0*(0.5-phi));
             phiNew[locIndex] -= dt*M0*pi/eta*std::sqrt(phi*(1.0-phi))*dg;
 
             // Limit phase-field values to [0,1]
