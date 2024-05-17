@@ -48,10 +48,10 @@ const double dt_thermal = (dim > 1) ? ((dim > 2) ? (dx*dx/alpha/6.0)     : (dx*d
 const double dt = 0.75*std::min(dt_phase, dt_thermal); // Size of time step [s]
 
 // Define number of time steps
-const double simTime = 20000.0;// Total simulation time [s]
+const double simTime = 1000.0;// Total simulation time [s]
 const int Nt     = simTime/dt; // Number of time steps
 const int tOut   = 1000;   // Output distance in time steps
-bool WriteToDisk = true;
+bool WriteToDisk = false;
 
 
 // Misc parameters
@@ -295,7 +295,7 @@ std::string ctime() {
 void StartSimulation()
 {
     //TODO no standard exception handling
-    feenableexcept(FE_DIVBYZERO | FE_INVALID);
+    //feenableexcept(FE_DIVBYZERO | FE_INVALID);
 
     // Calculate memory size
     size_t size = Mx * My * Mz * sizeof(double);
