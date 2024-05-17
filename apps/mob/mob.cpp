@@ -11,11 +11,11 @@
 //#include <omp.h>
 
 // Define number of Boundary Cells
-#define BCELLS 1
+#define BCELLS 2
 
 // Define computation domain size
-const int Nx = 512; // Domain size in x-direction
-const int Ny = 1024;// Domain size in y-direction
+const int Nx = 128; // Domain size in x-direction
+const int Ny = 256;// Domain size in y-direction
 const int Nz = 1;   // Domain size in z-direction
 const int dim = (Nx > 1) + (Ny > 1) + (Nz > 1);
 
@@ -168,25 +168,34 @@ double Laplace(double* field, int i, int j, int k)
 
 double interfaceEnergy(double* phi, int i, int j, int k)
 {
-    double dphix = (-1.0/12.0*phi[Index(i+2,j,k)] + 2.0/3.0*phi[Index(i+1,j,k)] - 2.0/3.0*phi[Index(i-1,j,k)] + 1.0/12.0*phi[Index(i-2,j,k)])/dx;
-    double dphiy = (-1.0/12.0*phi[Index(i,j+2,k)] + 2.0/3.0*phi[Index(i,j+1,k)] - 2.0/3.0*phi[Index(i,j-1,k)] + 1.0/12.0*phi[Index(i,j-2,k)])/dy;
-    double dphiz = (-1.0/12.0*phi[Index(i,j,k+2)] + 2.0/3.0*phi[Index(i,j,k+1)] - 2.0/3.0*phi[Index(i,j,k-1)] + 1.0/12.0*phi[Index(i,j,k-2)])/dz;
-    double normDPhi = std::sqrt(dphix*dphix + dphiy*dphiy + dphiz*dphiz);
-    double nx = dphix/normDPhi;
-    double ny = dphiy/normDPhi;
-    double nz = dphiz/normDPhi;
-    double rnx = std::cos(theta)*nx - std::sin(theta)*ny;
-    double rny = std::sin(theta)*nx + std::cos(theta)*ny;
-    double rnz = nz;
-    double rnx4 = rnx*rnx*rnx*rnx;
-    double rny4 = rny*rny*rny*rny;
-    double rnz4 = rnz*rnz*rnz*rnz;
+    const double dphix = (-1.0/12.0*phi[Index(i+2,j,k)] + 2.0/3.0*phi[Index(i+1,j,k)] - 2.0/3.0*phi[Index(i-1,j,k)] + 1.0/12.0*phi[Index(i-2,j,k)])/dx;
+    const double dphiy = (-1.0/12.0*phi[Index(i,j+2,k)] + 2.0/3.0*phi[Index(i,j+1,k)] - 2.0/3.0*phi[Index(i,j-1,k)] + 1.0/12.0*phi[Index(i,j-2,k)])/dy;
+    const double dphiz = (-1.0/12.0*phi[Index(i,j,k+2)] + 2.0/3.0*phi[Index(i,j,k+1)] - 2.0/3.0*phi[Index(i,j,k-1)] + 1.0/12.0*phi[Index(i,j,k-2)])/dz;
+    const double normDPhi = std::sqrt(dphix*dphix + dphiy*dphiy + dphiz*dphiz);
+    const double nx = dphix/normDPhi;
+    const double ny = dphiy/normDPhi;
+    const double nz = dphiz/normDPhi;
+    const double rnx = std::cos(theta)*nx - std::sin(theta)*ny;
+    const double rny = std::sin(theta)*nx + std::cos(theta)*ny;
+    const double rnz = nz;
+    const double rnx4 = rnx*rnx*rnx*rnx;
+    const double rny4 = rny*rny*rny*rny;
+    const double rnz4 = rnz*rnz*rnz*rnz;
     //return sigma0*(1.0+epsilon*(rnx4+rny4+rnz4)); // Cubic Energy
     return sigma0*(1.0+epsilon*(1.5-2.5*(rnx4+rny4+rnz4))); // Cubic Stiffness
 }
 
-void CalcTimeStep(double* phiOld, double* phiNew, double* uOld, double* uNew)
+void CalcTimeStep(double* phiOld, double* phiNew, double* uOld, double* uNew, double* sigma)
 {
+    #pragma omp parallel for schedule(auto) collapse(2)
+    for (int i = BCELLS; i < Nx + BCELLS; i++)
+    for (int j = BCELLS; j < Ny + BCELLS; j++)
+    for (int k = BCELLS; k < Nz + BCELLS; k++)
+    {
+        const int locIndex = Index(i,j,k);
+        //sigma[locIndex] = interfaceEnergy(phiOld,i,j,k);
+    }
+
     #pragma omp parallel for schedule(auto) collapse(2)
     for (int i = BCELLS; i < Nx + BCELLS; i++)
     for (int j = BCELLS; j < Ny + BCELLS; j++)
@@ -204,8 +213,8 @@ void CalcTimeStep(double* phiOld, double* phiNew, double* uOld, double* uNew)
             const double pi    = std::numbers::pi;
             const double dg    = L*rho*uOld[locIndex];
             const double phi   = phiOld[locIndex];
-            const double sigma = interfaceEnergy(phiOld,i,j,k);
-            phiNew[locIndex] += dt*M0*sigma*(laplacePhi -pi*pi/eta/eta/2.0*(0.5-phi));
+            const double locSigma = interfaceEnergy(phiOld,i,j,k);
+            phiNew[locIndex] += dt*M0*locSigma*(laplacePhi -pi*pi/eta/eta/2.0*(0.5-phi));
             phiNew[locIndex] -= dt*M0*pi/eta*std::sqrt(phi*(1.0-phi))*dg;
 
             // Limit phase-field values to [0,1]
@@ -233,9 +242,10 @@ void SetBoundariesX(double* field)
     #pragma omp parallel for schedule(auto) collapse(1)
     for (int j = 0; j < My; j++)
     for (int k = 0; k < Mz; k++)
+    for (int i = 0; i < BCELLS; i++)
     {
-        field[Index(0   ,j,k)] = field[Index(1   ,j,k)];
-        field[Index(Mx-1,j,k)] = field[Index(Mx-2,j,k)];
+        field[Index(i     ,j,k)] = field[Index(2*BCELLS-1-i ,j,k)];
+        field[Index(Mx-1-i,j,k)] = field[Index(Mx-2*BCELLS+i,j,k)];
     }
 }
 
@@ -244,9 +254,10 @@ void SetBoundariesY(double* field)
     #pragma omp parallel for schedule(auto) collapse(1)
     for (int i = 0; i < Mx; i++)
     for (int k = 0; k < Mz; k++)
+    for (int j = 0; j < BCELLS; j++)
     {
-        field[Index(i,0   ,k)] = field[Index(i,1   ,k)];
-        field[Index(i,My-1,k)] = field[Index(i,My-2,k)];
+        field[Index(i,j     ,k)] = field[Index(i,2*BCELLS-1-j ,k)];
+        field[Index(i,My-1-j,k)] = field[Index(i,My-2*BCELLS+j,k)];
     }
 }
 
@@ -255,9 +266,10 @@ void SetBoundariesZ(double* field)
     #pragma omp parallel for schedule(auto) collapse(1)
     for (int i = 0; i < Mx; i++)
     for (int j = 0; j < My; j++)
+    for (int k = 0; k < BCELLS; k++)
     {
-        field[Index(i,j,0   )] = field[Index(i,j,1   )];
-        field[Index(i,j,Mz-1)] = field[Index(i,j,Mz-2)];
+        field[Index(i,j,k     )] = field[Index(i,j,2*BCELLS-1-k )];
+        field[Index(i,j,Mz-1-k)] = field[Index(i,j,Mz-2*BCELLS+k)];
     }
 }
 
@@ -293,6 +305,7 @@ void StartSimulation()
     double* phiOld  = new double [size];
     double* uNew    = new double [size];
     double* uOld    = new double [size];
+    double* sigma   = new double [size];
 
     // Initialize Fields
     std::cout << ctime() << "Initialize Fields\n";
@@ -321,7 +334,7 @@ void StartSimulation()
             }
         }
 
-        CalcTimeStep(phiNew, phiOld, uNew, uOld);
+        CalcTimeStep(phiNew, phiOld, uNew, uOld, sigma);
         SetBoundaryConditions(phiNew);
         SetBoundaryConditions(uNew);
     }
@@ -336,6 +349,7 @@ void StartSimulation()
     delete[] phiOld;
     delete[] uNew;
     delete[] uOld;
+    delete[] sigma;
 }
 
 int main()
